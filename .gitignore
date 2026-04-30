@@ -19,6 +19,7 @@ publisher/wrangler.toml
 *.env
 *.token
 .tokens/
+*.bak
 
 # editors
 .vscode/
