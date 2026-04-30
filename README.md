@@ -87,7 +87,15 @@ npx wrangler deploy
 
 Save the `PUBLISHER_TOKEN` value somewhere safe — you'll paste it into the plugin and the CLI. (Cloudflare can't show it to you again.)
 
-### 2. Build + install the Obsidian plugin
+### 2. Install the Obsidian plugin
+
+**Option A — via [BRAT](https://github.com/TfTHacker/obsidian42-brat) (one-click, recommended):**
+
+1. Install the **Obsidian42 — BRAT** plugin from the community store and enable it.
+2. **Cmd+P → "BRAT: Add a beta plugin for testing"** → paste `MachoMaheen/brainshare`.
+3. BRAT downloads the latest GitHub Release into your vault. Enable BrainShare in **Settings → Community plugins**.
+
+**Option B — build from source:**
 
 ```bash
 cd ~/Desktop/brainshare/plugin
@@ -98,7 +106,7 @@ mkdir -p <your-vault>/.obsidian/plugins/brainshare
 cp manifest.json main.js <your-vault>/.obsidian/plugins/brainshare/
 ```
 
-In Obsidian: **Settings → Community plugins → enable BrainShare → BrainShare settings**
+After install (either path): **Settings → Community plugins → enable BrainShare → BrainShare settings**
 
 - **Publisher URL**: your worker URL from step 1
 - **Publisher token**: the `PUBLISHER_TOKEN` value

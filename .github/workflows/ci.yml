@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  publisher:
+    name: publisher (worker) type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: publisher/package-lock.json
+      - run: npm ci
+        working-directory: publisher
+      - run: npx tsc
+        working-directory: publisher
+
+  plugin:
+    name: plugin build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - run: npm ci
+        working-directory: plugin
+      - run: npm run build
+        working-directory: plugin
+      - name: Sanity-check that main.js was emitted
+        run: test -f plugin/main.js && wc -l plugin/main.js
+
+  wrapper:
+    name: wrapper CLI type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: wrapper/package-lock.json
+      - run: npm ci
+        working-directory: wrapper
+      - run: npx tsc --noEmit
+        working-directory: wrapper
