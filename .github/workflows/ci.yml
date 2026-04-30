@@ -21,9 +21,11 @@ jobs:
         working-directory: publisher
       - run: npx tsc
         working-directory: publisher
+      - run: npm test
+        working-directory: publisher
 
   plugin:
-    name: plugin build
+    name: plugin build + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +35,8 @@ jobs:
           cache: npm
           cache-dependency-path: plugin/package-lock.json
       - run: npm ci
+        working-directory: plugin
+      - run: npm test
         working-directory: plugin
       - run: npm run build
         working-directory: plugin

@@ -177,14 +177,13 @@ python3 scripts/bulk-publish.py \
 | Type-checked end-to-end (TypeScript strict) | ✅ |
 | JWT auth with revoke / expiry / view-limits | ✅ |
 | Cloudflare-edge replicated KV | ✅ |
-| Smoke-tested all routes | ✅ |
+| Smoke-tested all routes + 33 unit tests (JWT, frontmatter, ULID) | ✅ |
+| Per-IP rate limiting on auth-required write routes | ✅ — KV-based, catches sustained floods (>1 min); bursts may leak due to KV's eventual consistency. For hard ceilings use Cloudflare's paid Rate Limiting or Durable Objects. |
+| Backup / export | ✅ — `GET /api/export` returns NDJSON of every KV key; `scripts/export.py` for CLI dumps |
 | Multi-tenancy (shared worker, multiple authors) | ❌ — single `PUBLISHER_TOKEN` per worker; deploy your own |
-| Rate limiting | ❌ — add a Cloudflare WAF rule before going public |
-| Backups / export | ❌ — KV deletion is forever; write your own dump script |
-| Tests beyond smoke | ❌ |
 | Mermaid / syntax highlighting / math | ❌ — markdown rendering is plain |
 | Mobile / accessibility audit | ❌ |
-| Plugin in Obsidian community store | ❌ — install via BRAT or copy the build manually |
+| Plugin in Obsidian community store | 🟡 — submitted, awaiting review (~2-4 weeks). Install via BRAT in the meantime. |
 
 **TL;DR — production-ready for personal/team use. Not yet a public SaaS product.** If you deploy your own worker, you control your own data and tokens; nobody else can touch them.
 

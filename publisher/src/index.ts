@@ -25,6 +25,30 @@ function forbidden(): Response {
   return new Response("forbidden", { status: 403 });
 }
 
+// Per-IP rate limiting via KV. KV is eventually consistent, so this leaks slightly under
+// concurrent edge requests — fine for "stop a flood from one IP", not a hard ceiling.
+async function rateLimitOk(
+  env: Env,
+  req: Request,
+  bucket: string,
+  max: number,
+  windowSec: number
+): Promise<boolean> {
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const k = `ratelimit:${bucket}:${ip}`;
+  const cur = parseInt((await env.NOTES.get(k)) ?? "0", 10);
+  if (cur >= max) return false;
+  await env.NOTES.put(k, String(cur + 1), { expirationTtl: windowSec });
+  return true;
+}
+
+function rateLimited(retryAfterSec: number): Response {
+  return new Response("rate limit exceeded — slow down", {
+    status: 429,
+    headers: { "retry-after": String(retryAfterSec), "content-type": "text/plain" },
+  });
+}
+
 function html(body: string, status = 200): Response {
   return new Response(body, {
     status,
@@ -100,6 +124,7 @@ export default {
     const noteMatch = path.match(/^\/api\/notes\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (noteMatch) {
       if (unauthorized(env, req)) return forbidden();
+      if (req.method === "PUT" && !(await rateLimitOk(env, req, "notes", 120, 60))) return rateLimited(60);
       const ulid = noteMatch[1];
       if (req.method === "PUT") {
         const body = await req.text();
@@ -122,11 +147,37 @@ export default {
       return new Response("method not allowed", { status: 405 });
     }
 
+    // GET /api/export — stream every KV key/value as NDJSON for backup (auth required)
+    if (path === "/api/export") {
+      if (unauthorized(env, req)) return forbidden();
+      if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+      const lines: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const list = await env.NOTES.list({ cursor, limit: 1000 });
+        for (const k of list.keys) {
+          const value = await env.NOTES.get(k.name);
+          lines.push(JSON.stringify({ key: k.name, value }));
+        }
+        cursor = list.list_complete ? undefined : list.cursor;
+        pages++;
+        if (pages > 20) break; // safety: 20k keys hard cap; bump if you outgrow this
+      } while (cursor);
+      return new Response(lines.join("\n") + "\n", {
+        headers: {
+          "content-type": "application/x-ndjson",
+          "content-disposition": `attachment; filename="brainshare-backup-${new Date().toISOString().slice(0, 19)}.ndjson"`,
+        },
+      });
+    }
+
     // POST /api/wrappers/:id/tokens — mint an access token for a gated wrapper
     const mintMatch = path.match(/^\/api\/wrappers\/([a-zA-Z0-9_-]{1,64})\/tokens$/);
     if (mintMatch) {
       if (unauthorized(env, req)) return forbidden();
       if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+      if (!(await rateLimitOk(env, req, "mint", 30, 60))) return rateLimited(60);
       if (!env.JWT_SECRET) return new Response("JWT_SECRET not configured", { status: 500 });
       const id = mintMatch[1];
       const wrapRaw = await env.NOTES.get(`wrap:${id}`);
@@ -163,6 +214,7 @@ export default {
     if (revokeMatch) {
       if (unauthorized(env, req)) return forbidden();
       if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+      if (!(await rateLimitOk(env, req, "revoke", 30, 60))) return rateLimited(60);
       let body: { jti?: string };
       try { body = await req.json(); } catch { body = {}; }
       if (!body.jti) return new Response("missing jti", { status: 400 });
@@ -174,6 +226,7 @@ export default {
     const wrapMatch = path.match(/^\/api\/wrappers\/([a-zA-Z0-9_-]{1,64})$/);
     if (wrapMatch) {
       if (unauthorized(env, req)) return forbidden();
+      if (req.method === "PUT" && !(await rateLimitOk(env, req, "wrap", 60, 60))) return rateLimited(60);
       const id = wrapMatch[1];
       if (req.method === "PUT") {
         const body = await req.text();
