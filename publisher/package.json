@@ -1,0 +1,19 @@
+{
+  "name": "brainshare-publisher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker that stores notes in KV and renders /:ulid as HTML",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "marked": "^11.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240403.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.50.0"
+  }
+}

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# plugin build output
+plugin/main.js
+plugin/main.js.map
+
+# wrangler — user's own KV namespace IDs and secrets stay local
+publisher/wrangler.toml
+.wrangler/
+.dev.vars
+
+# typescript
+*.tsbuildinfo
+
+# tokens, env files
+*.env
+*.token
+.tokens/
+
+# editors
+.vscode/
+.idea/

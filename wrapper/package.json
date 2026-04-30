@@ -1,0 +1,23 @@
+{
+  "name": "brainshare-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI: bundle ULIDs into a wrapper page on the BrainShare publisher",
+  "bin": {
+    "brainshare-wrap": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "wrap": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/yargs": "^17.0.32",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
