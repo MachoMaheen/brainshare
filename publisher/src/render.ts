@@ -228,6 +228,26 @@ blockquote {
   font-size: .75em;
   color: var(--text-faint);
   pointer-events: none;
+  z-index: 2;
+}
+.graph-reset-btn {
+  position: absolute;
+  top: 8px; right: 12px;
+  z-index: 2;
+  padding: .35em .7em;
+  font-size: .8em;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity .15s, color .15s, border-color .15s;
+  opacity: .85;
+}
+.graph-reset-btn:hover {
+  opacity: 1;
+  color: var(--text-accent);
+  border-color: var(--text-accent);
 }
 
 .note-list {
@@ -760,7 +780,8 @@ export async function renderWrapper(
 </div>
 
 <div id="graph-host">
-  <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus</span>
+  <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus · double-click empty space to reset</span>
+  <button id="graph-reset" class="graph-reset-btn" type="button" title="Reset view (or double-click empty space)">⌖ Reset view</button>
   <div id="graph" style="width:100%;height:100%"></div>
 </div>
 
@@ -856,8 +877,27 @@ ${folderSections.join("")}
     labelGridCellSize: 80,
     renderEdgeLabels: false,
     defaultEdgeColor: edgeColor,
-    minCameraRatio: 0.1,
-    maxCameraRatio: 4,
+    minCameraRatio: 0.05,
+    maxCameraRatio: 8,
+  });
+
+  // Reset/fit handler — bring the camera back to the default state that frames
+  // every node. Used by the explicit Reset button + double-click on empty space.
+  function resetView() {
+    var camera = renderer.getCamera();
+    if (typeof camera.animatedReset === "function") {
+      camera.animatedReset({ duration: 400 });
+    } else {
+      camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+    }
+  }
+
+  var resetBtn = document.getElementById("graph-reset");
+  if (resetBtn) resetBtn.addEventListener("click", resetView);
+  // Sigma fires "doubleClickStage" when you double-click empty graph space (not a node).
+  renderer.on("doubleClickStage", function(e){
+    if (e && e.preventSigmaDefault) e.preventSigmaDefault(); // suppress sigma's own double-click zoom
+    resetView();
   });
 
   // Hover-dim implemented via direct attribute mutation — simpler and more reliable
