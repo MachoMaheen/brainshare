@@ -15,6 +15,7 @@ import secrets
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -62,7 +63,9 @@ def publish(
             "authorization": f"Bearer {token}",
             "content-type": "text/markdown",
             "user-agent": "BrainShare-bulk-publish/0.1",
-            "x-note-path": note_path,
+            # HTTP headers are latin-1; percent-encode so paths with em-dashes,
+            # arrows, etc don't blow up. Worker decodes on read.
+            "x-note-path": urllib.parse.quote(note_path, safe="/"),
         },
     )
     try:

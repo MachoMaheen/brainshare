@@ -134,8 +134,13 @@ export default {
           return new Response("note too large (>1MB)", { status: 413 });
         }
         await env.NOTES.put(`note:${ulid}`, body);
-        const notePath = req.headers.get("x-note-path");
+        let notePath = req.headers.get("x-note-path");
         if (notePath) {
+          // Path may arrive URI-encoded (HTTP headers are latin-1, so non-ASCII paths
+          // — em-dashes, arrows, etc — must be percent-encoded by the client).
+          // decodeURIComponent fails on a literal `%` not part of a valid escape; in
+          // that case treat the value as already-decoded raw text.
+          try { notePath = decodeURIComponent(notePath); } catch { /* keep raw */ }
           const basename = notePath.split("/").pop()!.replace(/\.md$/i, "");
           await env.NOTES.put(`meta:${ulid}`, JSON.stringify({ path: notePath, basename }));
         }
