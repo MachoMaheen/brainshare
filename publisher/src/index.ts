@@ -2,6 +2,7 @@ import {
   renderNote,
   renderWrapper,
   renderGateError,
+  renderCanvas,
   buildShareSet,
   loadNotes,
   NoteMeta,
@@ -69,6 +70,23 @@ async function getNotePath(notes: KVNamespace, ulid: string): Promise<string | u
   const raw = await notes.get(`meta:${ulid}`);
   if (!raw) return undefined;
   try { return (JSON.parse(raw) as NoteMeta).path; } catch { return undefined; }
+}
+
+async function buildCanvasSet(notes: KVNamespace, ulids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ulids.length) return out;
+  const metas = await Promise.all(ulids.map((u) => notes.get(`canvasmeta:${u}`)));
+  for (let i = 0; i < ulids.length; i++) {
+    const raw = metas[i];
+    if (!raw) { out.set(ulids[i], ulids[i]); continue; }
+    try {
+      const meta = JSON.parse(raw) as NoteMeta;
+      out.set(meta.basename, ulids[i]);
+    } catch {
+      out.set(ulids[i], ulids[i]);
+    }
+  }
+  return out;
 }
 
 interface GateOk { ok: true; tokenQuery: string }
@@ -149,6 +167,66 @@ export default {
       if (req.method === "DELETE") {
         await env.NOTES.delete(`note:${ulid}`);
         await env.NOTES.delete(`meta:${ulid}`);
+        return new Response(null, { status: 204 });
+      }
+      return new Response("method not allowed", { status: 405 });
+    }
+
+    // PUT/DELETE /api/canvases/:ulid — store/delete a JSON Canvas file (auth required)
+    const canvasMatch = path.match(/^\/api\/canvases\/([0-9A-HJKMNP-TV-Z]{26})$/);
+    if (canvasMatch) {
+      if (unauthorized(env, req)) return forbidden();
+      if (req.method === "PUT" && !(await rateLimitOk(env, req, "notes", 120, 60))) return rateLimited(60);
+      const ulid = canvasMatch[1];
+      if (req.method === "PUT") {
+        const body = await req.text();
+        if (body.length > 2_000_000) return new Response("canvas too large (>2MB)", { status: 413 });
+        try { JSON.parse(body); } catch { return new Response("invalid JSON", { status: 400 }); }
+        await env.NOTES.put(`canvas:${ulid}`, body);
+        let p = req.headers.get("x-note-path");
+        if (p) {
+          try { p = decodeURIComponent(p); } catch { /* keep raw */ }
+          const basename = p.split("/").pop()!.replace(/\.canvas$/i, "");
+          await env.NOTES.put(`canvasmeta:${ulid}`, JSON.stringify({ path: p, basename }));
+        }
+        return json({ ulid, url: `${origin}/c/${ulid}` });
+      }
+      if (req.method === "DELETE") {
+        await env.NOTES.delete(`canvas:${ulid}`);
+        await env.NOTES.delete(`canvasmeta:${ulid}`);
+        return new Response(null, { status: 204 });
+      }
+      return new Response("method not allowed", { status: 405 });
+    }
+
+    // PUT/GET /api/assets/:key — opaque-keyed binary uploads (images etc).
+    // Key is a 64-char hex sha256 chosen by the uploader. PUT requires auth; GET is
+    // public (the long random key is the capability — only people who know it can fetch).
+    const assetMatch = path.match(/^\/(?:api\/)?asset(?:s)?\/([a-f0-9]{16,128})(?:\.[a-z0-9]+)?$/i);
+    if (assetMatch) {
+      const key = assetMatch[1].toLowerCase();
+      if (req.method === "PUT") {
+        if (unauthorized(env, req)) return forbidden();
+        if (!(await rateLimitOk(env, req, "asset-put", 60, 60))) return rateLimited(60);
+        const ct = req.headers.get("content-type") ?? "application/octet-stream";
+        const buf = await req.arrayBuffer();
+        if (buf.byteLength > 5_000_000) return new Response("asset too large (>5MB)", { status: 413 });
+        await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: ct } });
+        return json({ key, url: `${origin}/asset/${key}` });
+      }
+      if (req.method === "GET") {
+        const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
+        if (!value) return new Response("not found", { status: 404 });
+        const ct = (metadata as { contentType?: string } | null)?.contentType ?? "application/octet-stream";
+        return new Response(value, {
+          headers: {
+            "content-type": ct,
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
+      if (req.method === "DELETE" && !unauthorized(env, req)) {
+        await env.NOTES.delete(`asset:${key}`);
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
@@ -251,10 +329,19 @@ export default {
             return new Response(`bad ulid: ${u}`, { status: 400 });
           }
         }
+        if (parsed.canvases) {
+          if (!Array.isArray(parsed.canvases)) return new Response("canvases must be array", { status: 400 });
+          for (const u of parsed.canvases) {
+            if (!ULID_PATTERN.test(u)) return new Response(`bad canvas ulid: ${u}`, { status: 400 });
+          }
+        }
+        if (parsed.assets && (typeof parsed.assets !== "object" || Array.isArray(parsed.assets))) {
+          return new Response("assets must be { filename: key } object", { status: 400 });
+        }
         if (!parsed.created_at) parsed.created_at = new Date().toISOString();
         if (parsed.gated !== true) parsed.gated = false; // normalize
         await env.NOTES.put(`wrap:${id}`, JSON.stringify(parsed));
-        return json({ id, url: `${origin}/share/${id}`, gated: parsed.gated });
+        return json({ id, url: `${origin}/share/${id}`, gated: parsed.gated, canvases: parsed.canvases?.length ?? 0, assets: Object.keys(parsed.assets ?? {}).length });
       }
       if (req.method === "DELETE") {
         await env.NOTES.delete(`wrap:${id}`);
@@ -305,6 +392,35 @@ export default {
       });
     }
 
+    // GET /share/:wrapId/c/:ulid — canvas scoped to a wrapper
+    const scopedCanvasMatch = path.match(
+      /^\/share\/([a-zA-Z0-9_-]{1,64})\/c\/([0-9A-HJKMNP-TV-Z]{26})$/
+    );
+    if (scopedCanvasMatch && req.method === "GET") {
+      const [, wrapId, ulid] = scopedCanvasMatch;
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return html("<h1>404</h1><p>wrapper not found</p>", 404);
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      if (!wrap.canvases?.includes(ulid)) {
+        return html("<h1>403</h1><p>canvas not in this share</p>", 403);
+      }
+      const gate = await checkGate(env, wrap, wrapId, url);
+      if (!gate.ok) return gate.resp;
+
+      const [canvasJson, canvasPath, shareSet, canvasSet] = await Promise.all([
+        env.NOTES.get(`canvas:${ulid}`),
+        env.NOTES.get(`canvasmeta:${ulid}`).then(r => r ? (JSON.parse(r) as NoteMeta).path : undefined),
+        buildShareSet(env.NOTES, wrap.ulids),
+        buildCanvasSet(env.NOTES, wrap.canvases),
+      ]);
+      if (!canvasJson) return html("<h1>404</h1><p>canvas not yet published</p>", 404);
+      const shareBase = `${origin}/share/${wrapId}`;
+      return html(renderCanvas(canvasJson, ulid, {
+        shareBase, shareSet, canvasSet,
+        path: canvasPath, tokenQuery: gate.tokenQuery, gated: wrap.gated,
+      }));
+    }
+
     // GET /share/:wrapId/:ulid — note scoped to a wrapper's share-set
     const scopedMatch = path.match(
       /^\/share\/([a-zA-Z0-9_-]{1,64})\/([0-9A-HJKMNP-TV-Z]{26})$/
@@ -320,20 +436,36 @@ export default {
       const gate = await checkGate(env, wrap, wrapId, url);
       if (!gate.ok) return gate.resp;
 
-      const [md, notePath, shareSet] = await Promise.all([
+      const [md, notePath, shareSet, canvasSet] = await Promise.all([
         env.NOTES.get(`note:${ulid}`),
         getNotePath(env.NOTES, ulid),
         buildShareSet(env.NOTES, wrap.ulids),
+        buildCanvasSet(env.NOTES, wrap.canvases ?? []),
       ]);
       if (!md) return html("<h1>404</h1><p>note not yet published</p>", 404);
       const shareBase = `${origin}/share/${wrapId}`;
       return html(renderNote(md, ulid, {
         shareBase,
         shareSet,
+        canvasSet,
+        assets: wrap.assets,
         path: notePath,
         tokenQuery: gate.tokenQuery,
         gated: wrap.gated,
       }));
+    }
+
+    // GET /c/:ulid — standalone canvas (no wrapper context)
+    const standaloneCanvasMatch = path.match(/^\/c\/([0-9A-HJKMNP-TV-Z]{26})$/);
+    if (standaloneCanvasMatch && req.method === "GET") {
+      const ulid = standaloneCanvasMatch[1];
+      const [canvasJson, metaRaw] = await Promise.all([
+        env.NOTES.get(`canvas:${ulid}`),
+        env.NOTES.get(`canvasmeta:${ulid}`),
+      ]);
+      if (!canvasJson) return html("<h1>404</h1><p>canvas not found</p>", 404);
+      const canvasPath = metaRaw ? (JSON.parse(metaRaw) as NoteMeta).path : undefined;
+      return html(renderCanvas(canvasJson, ulid, { path: canvasPath }));
     }
 
     // GET /share/:id — wrapper landing page

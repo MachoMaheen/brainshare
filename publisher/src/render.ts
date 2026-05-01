@@ -165,6 +165,99 @@ blockquote {
   cursor: pointer;
 }
 .wikilink-internal:hover { background: var(--bg-chip); }
+.wikilink-canvas { font-size: .95em; }
+.embedded-image {
+  display: block; max-width: 100%; height: auto;
+  border-radius: 6px; margin: 1em auto;
+  background: var(--bg-secondary);
+}
+.embed-missing {
+  display: inline-block;
+  padding: .15em .5em; border-radius: 4px;
+  background: var(--bg-secondary); color: var(--text-faint);
+  font-size: .85em; font-style: italic;
+}
+.mermaid {
+  display: block; margin: 1.2em auto; text-align: center;
+  background: var(--bg-secondary); padding: 1em; border-radius: 6px;
+  overflow-x: auto;
+}
+.canvas-title { margin-top: .25em; }
+.canvas-help {
+  font-size: .85em; color: var(--text-faint);
+  margin: .25em 0 .8em;
+}
+.canvas-host {
+  position: relative;
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  height: 70vh; min-height: 500px;
+  margin: 0 0 2em;
+}
+#canvas-svg {
+  width: 100%; height: 100%;
+  cursor: grab;
+  background:
+    radial-gradient(circle at 1px 1px, var(--border-faint) 1px, transparent 1px) 0 0 / 24px 24px;
+}
+.canvas-text, .canvas-file, .canvas-link {
+  width: 100%; height: 100%;
+  padding: 10px 14px;
+  background: var(--bg-primary);
+  border: 2px solid;
+  border-radius: 8px;
+  color: var(--text-normal);
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+.canvas-text > :first-child { margin-top: 0; }
+.canvas-text > :last-child { margin-bottom: 0; }
+.canvas-text h1, .canvas-text h2 { margin-top: .3em; margin-bottom: .25em; font-size: 1.1em; }
+.canvas-file {
+  display: flex; flex-direction: column; justify-content: center;
+  text-decoration: none !important;
+}
+.canvas-file:hover { background: var(--bg-chip); }
+.canvas-file-name { font-weight: 500; }
+.canvas-file-private { opacity: .6; }
+.canvas-file-private-note { font-size: .75em; color: var(--text-faint); margin-top: 4px; }
+.canvas-link {
+  display: flex; align-items: center; gap: .4em;
+  font-size: .85em;
+  color: var(--text-link);
+  text-decoration: none !important;
+  word-break: break-all;
+}
+.canvas-list {
+  display: grid; gap: .5em;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  list-style: none; padding: 0;
+}
+.canvas-list li { margin: 0; }
+.canvas-list a {
+  display: flex; align-items: center; gap: .6em;
+  padding: .65em .85em;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  text-decoration: none !important;
+}
+.canvas-list a:hover { border-color: var(--text-accent); background: var(--bg-chip); }
+.canvas-list .canvas-icon { font-size: 1.2em; }
+.canvas-list .title { flex: 1; font-weight: 500; }
+.canvas-list .ulid {
+  font-size: .7em; color: var(--text-faint);
+  font-family: "SF Mono", Menlo, monospace;
+}
+.canvas-edge-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  paint-order: stroke; stroke: var(--bg-secondary); stroke-width: 4;
+}
 .wikilink-private {
   color: var(--text-accent);
   border-bottom: 1px dotted var(--text-accent);
@@ -515,8 +608,36 @@ export interface WrapData {
   title?: string;
   description?: string;
   ulids: string[];
+  canvases?: string[];                // canvas ULIDs in this share
+  assets?: Record<string, string>;    // image filename → opaque asset key
   created_at?: string;
   gated?: boolean;
+}
+
+export interface CanvasNode {
+  id: string;
+  type: "text" | "file" | "link" | "group";
+  x: number; y: number; width: number; height: number;
+  color?: string;
+  text?: string;
+  file?: string;
+  url?: string;
+  label?: string;
+  subpath?: string;
+}
+export interface CanvasEdge {
+  id: string;
+  fromNode: string; toNode: string;
+  fromSide?: "top" | "right" | "bottom" | "left";
+  toSide?: "top" | "right" | "bottom" | "left";
+  color?: string;
+  label?: string;
+  toEnd?: "arrow" | "none";
+  fromEnd?: "arrow" | "none";
+}
+export interface CanvasData {
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
 }
 
 export interface NoteRecord {
@@ -591,7 +712,9 @@ export function buildEdges(records: NoteRecord[]): Array<{ from: string; to: str
 
 export interface RenderCtx {
   shareBase?: string;             // e.g. https://.../share/<wrap-id>
-  shareSet?: Map<string, string>; // basename → ulid
+  shareSet?: Map<string, string>; // basename → ulid (for .md wikilink resolution)
+  canvasSet?: Map<string, string>;// canvas basename (no ext) → canvas ulid
+  assets?: Record<string, string>;// image filename → asset key (for image embed rewriting)
   path?: string;                  // vault-relative path (for breadcrumb)
   tokenQuery?: string;            // "?t=<jwt>" appended to internal links when gated
   gated?: boolean;
@@ -609,16 +732,57 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     (match, heading: string) =>
       heading.trim().toLowerCase() === title.trim().toLowerCase() ? "" : match
   );
-  // Resolve wikilinks (in markdown, before marked sees them, so internal ones survive as raw HTML)
-  const body = dedupedBody.replace(
+  // Image extensions Obsidian recognises in embeds — used for both ![[…]] and ![](…) forms
+  const IMG_EXT = /\.(png|jpe?g|gif|svg|webp|avif|bmp)$/i;
+  const assetUrl = (filename: string): string | null => {
+    if (!ctx?.assets) return null;
+    // Match either by full path or by basename — bulk-publish stores both forms
+    const direct = ctx.assets[filename] || ctx.assets[filename.split("/").pop() ?? filename];
+    return direct ? `/asset/${direct}` : null;
+  };
+
+  // ![[image.jpg]] and ![[image.jpg|alt]] — Obsidian-style image embeds (must run before
+  // the wikilink rewrite or they'd be converted to bare wikilinks).
+  let preBody = dedupedBody.replace(
+    /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_m, target: string, alias?: string) => {
+      const t = target.trim();
+      const url = assetUrl(t);
+      if (url) return `<img src="${escapeAttr(url)}" alt="${escapeAttr((alias ?? t).trim())}" class="embedded-image" loading="lazy">`;
+      return `<span class="embed-missing" title="asset not in this share">📎 ${escapeHtml(t)}</span>`;
+    }
+  );
+
+  // ![alt](image.jpg) — standard markdown image syntax, only rewrite if the path is a vault-relative
+  // image (no protocol). We let marked handle remote images normally.
+  preBody = preBody.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    (m, alt: string, src: string) => {
+      const s = src.trim();
+      if (/^https?:\/\//i.test(s) || s.startsWith("/asset/")) return m;
+      if (!IMG_EXT.test(s)) return m;
+      const url = assetUrl(s);
+      return url ? `![${alt}](${url})` : m;
+    }
+  );
+
+  // [[Wikilink]] — resolve against share-set (.md) and canvasSet (.canvas) so canvases linked
+  // from notes become navigable too.
+  const body = preBody.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_m, target: string, alias?: string) => {
       const targetTrim = target.trim();
       const label = (alias ?? target).trim();
-      if (ctx?.shareBase && ctx.shareSet) {
-        const targetUlid = ctx.shareSet.get(targetTrim);
-        if (targetUlid) {
-          return `<a class="wikilink-internal" href="${ctx.shareBase}/${targetUlid}${tq}">${escapeHtml(label)}</a>`;
+      if (ctx?.shareBase) {
+        const noteUlid = ctx.shareSet?.get(targetTrim);
+        if (noteUlid) {
+          return `<a class="wikilink-internal" href="${ctx.shareBase}/${noteUlid}${tq}">${escapeHtml(label)}</a>`;
+        }
+        // Try canvas: target may end with .canvas or just be the basename
+        const canvasKey = targetTrim.replace(/\.canvas$/i, "");
+        const canvasUlid = ctx.canvasSet?.get(canvasKey);
+        if (canvasUlid) {
+          return `<a class="wikilink-internal wikilink-canvas" href="${ctx.shareBase}/c/${canvasUlid}${tq}" title="canvas">🗺 ${escapeHtml(label)}</a>`;
         }
       }
       return `<span class="wikilink-private" title="not in this published slice">${escapeHtml(label)}</span>`;
@@ -629,13 +793,35 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
   const breadcrumb = renderBreadcrumb(ctx, title);
   const props = renderProperties(fm, ulid);
 
+  // Detect mermaid blocks so we only ship the (heavy) mermaid runtime when there's
+  // something to render. marked emits ```mermaid as <pre><code class="language-mermaid">.
+  const hasMermaid = /<code class="language-mermaid">/.test(html);
+  const tail = hasMermaid ? MERMAID_BOOTSTRAP : "";
+
   return shell({ title, body: `
 ${breadcrumb}
 ${props}
 <h1>${escapeHtml(title)}</h1>
 ${html}
+${tail}
 ` });
 }
+
+// Loaded only on pages that contain ```mermaid``` blocks. Converts <pre><code class="language-mermaid">
+// to mermaid divs and runs the renderer. Theme follows the page's color scheme.
+const MERMAID_BOOTSTRAP = `<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default", securityLevel: "loose" });
+document.querySelectorAll("pre > code.language-mermaid").forEach((el) => {
+  const code = el.textContent;
+  const div = document.createElement("div");
+  div.className = "mermaid";
+  div.textContent = code;
+  el.parentElement.replaceWith(div);
+});
+mermaid.run().catch(e => console.warn("mermaid:", e));
+</script>`;
 
 function renderBreadcrumb(ctx: RenderCtx | undefined, title: string): string {
   const scoped = !!ctx?.shareBase;
@@ -715,6 +901,19 @@ export async function renderWrapper(
   const shareBase = `${origin}/share/${wrapId}`;
   const tq = tokenQuery;
 
+  // Load canvas metadata so the landing can list them
+  const canvasMetas = await Promise.all((wrap.canvases ?? []).map(async (u) => {
+    const raw = await notes.get(`canvasmeta:${u}`);
+    let path = u, basename = u;
+    if (raw) {
+      try {
+        const m = JSON.parse(raw) as NoteMeta;
+        path = m.path; basename = m.basename;
+      } catch { /* keep defaults */ }
+    }
+    return { ulid: u, path, basename };
+  }));
+
   // Group notes by folder so the landing page mirrors Obsidian's file explorer
   // instead of being a flat dump.
   const groups = new Map<string, typeof records>();
@@ -785,10 +984,15 @@ export async function renderWrapper(
   <div id="graph" style="width:100%;height:100%"></div>
 </div>
 
+${canvasMetas.length > 0 ? `
+<h2 style="margin-top:1em">Canvases in this slice</h2>
+<ul class="canvas-list">${canvasMetas.map(c => `<li><a href="${shareBase}/c/${c.ulid}${tq}"><span class="canvas-icon">🗺</span><span class="title">${escapeHtml(c.basename)}</span><span class="ulid">${c.ulid}</span></a></li>`).join("")}</ul>
+` : ""}
+
 <h2 style="margin-top:1em">Notes in this slice</h2>
 ${folderSections.join("")}
 
-<div class="wrap-meta">${records.length} note(s) · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
+<div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${wrap.assets ? ` · ${Object.keys(wrap.assets).length} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
@@ -933,6 +1137,234 @@ ${folderSections.join("")}
 `,
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CANVAS_COLORS: Record<string, string> = {
+  "1": "#fb464c", // red
+  "2": "#e9973f", // orange
+  "3": "#e0de71", // yellow
+  "4": "#44cf6e", // green
+  "5": "#53dfdd", // cyan
+  "6": "#a882ff", // purple
+};
+
+function canvasColor(c: string | undefined): string {
+  if (!c) return "#888";
+  if (c.startsWith("#")) return c;
+  return CANVAS_COLORS[c] ?? "#888";
+}
+
+function nodeAnchor(n: CanvasNode, side: "top" | "right" | "bottom" | "left" | undefined): { x: number; y: number } {
+  const cx = n.x + n.width / 2;
+  const cy = n.y + n.height / 2;
+  switch (side) {
+    case "top": return { x: cx, y: n.y };
+    case "right": return { x: n.x + n.width, y: cy };
+    case "bottom": return { x: cx, y: n.y + n.height };
+    case "left": return { x: n.x, y: cy };
+    default: return { x: cx, y: cy };
+  }
+}
+
+export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): string {
+  let canvas: CanvasData;
+  try {
+    canvas = JSON.parse(json) as CanvasData;
+  } catch {
+    return shell({ title: "Canvas (parse error)", body: `<div class="gate-error"><h1>Could not parse canvas</h1></div>` });
+  }
+  if (!canvas.nodes?.length) {
+    return shell({ title: "Empty canvas", body: `<div class="gate-error"><h1>This canvas is empty</h1></div>` });
+  }
+
+  const tq = ctx?.tokenQuery ?? "";
+  const title = ctx?.path
+    ? (ctx.path.split("/").pop() ?? ulid).replace(/\.canvas$/i, "")
+    : ulid;
+
+  // Bounds
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of canvas.nodes) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width);
+    maxY = Math.max(maxY, n.y + n.height);
+  }
+  const pad = 80;
+  const vbX = minX - pad, vbY = minY - pad;
+  const vbW = (maxX - minX) + pad * 2;
+  const vbH = (maxY - minY) + pad * 2;
+
+  const nodeIndex: Record<string, CanvasNode> = {};
+  for (const n of canvas.nodes) nodeIndex[n.id] = n;
+
+  // Render groups first so they sit behind everything
+  const groups = canvas.nodes.filter((n) => n.type === "group");
+  const others = canvas.nodes.filter((n) => n.type !== "group");
+
+  const renderTextNode = (n: CanvasNode) => {
+    const md = n.text ?? "";
+    const html = marked.parse(md, { async: false }) as string;
+    const color = canvasColor(n.color);
+    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">
+      <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-text" style="border-color:${color}">${html}</div>
+    </foreignObject>`;
+  };
+
+  const renderFileNode = (n: CanvasNode) => {
+    const file = (n.file ?? "").trim();
+    const basename = file.split("/").pop()?.replace(/\.md$/i, "") ?? file;
+    const color = canvasColor(n.color);
+    let inner = `<div class="canvas-file-name">📄 ${escapeHtml(basename)}</div>`;
+    let href: string | null = null;
+    if (ctx?.shareBase) {
+      const u = ctx.shareSet?.get(basename);
+      if (u) href = `${ctx.shareBase}/${u}${tq}`;
+      else {
+        const cu = ctx.canvasSet?.get(basename.replace(/\.canvas$/i, ""));
+        if (cu) href = `${ctx.shareBase}/c/${cu}${tq}`;
+      }
+    }
+    const link = href
+      ? `<a xmlns="http://www.w3.org/1999/xhtml" href="${escapeAttr(href)}" class="canvas-file" style="border-color:${color}">${inner}</a>`
+      : `<div xmlns="http://www.w3.org/1999/xhtml" class="canvas-file canvas-file-private" style="border-color:${color}">${inner}<div class="canvas-file-private-note">not in this share</div></div>`;
+    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">${link}</foreignObject>`;
+  };
+
+  const renderLinkNode = (n: CanvasNode) => {
+    const url = n.url ?? "";
+    const color = canvasColor(n.color);
+    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">
+      <a xmlns="http://www.w3.org/1999/xhtml" href="${escapeAttr(url)}" class="canvas-link" style="border-color:${color}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>
+    </foreignObject>`;
+  };
+
+  const renderGroupNode = (n: CanvasNode) => {
+    const color = canvasColor(n.color);
+    const label = n.label ?? "";
+    return `<g class="canvas-group">
+      <rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="12" fill="${color}" fill-opacity="0.08" stroke="${color}" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="6 4"/>
+      ${label ? `<text x="${n.x + 12}" y="${n.y + 22}" font-size="16" font-weight="600" fill="${color}">${escapeHtml(label)}</text>` : ""}
+    </g>`;
+  };
+
+  const groupSvg = groups.map(renderGroupNode).join("\n");
+  const otherSvg = others.map((n) => {
+    if (n.type === "text") return renderTextNode(n);
+    if (n.type === "file") return renderFileNode(n);
+    if (n.type === "link") return renderLinkNode(n);
+    return "";
+  }).join("\n");
+
+  const edgeSvg = canvas.edges?.map((e) => {
+    const from = nodeIndex[e.fromNode];
+    const to = nodeIndex[e.toNode];
+    if (!from || !to) return "";
+    const a = nodeAnchor(from, e.fromSide);
+    const b = nodeAnchor(to, e.toSide);
+    // Cubic bezier; control points pull along the side direction so curves leave the node naturally
+    const offset = Math.max(40, Math.abs(b.x - a.x) / 3);
+    const c1 = (() => {
+      switch (e.fromSide) {
+        case "right": return { x: a.x + offset, y: a.y };
+        case "left": return { x: a.x - offset, y: a.y };
+        case "top": return { x: a.x, y: a.y - offset };
+        case "bottom": return { x: a.x, y: a.y + offset };
+        default: return { x: (a.x + b.x) / 2, y: a.y };
+      }
+    })();
+    const c2 = (() => {
+      switch (e.toSide) {
+        case "right": return { x: b.x + offset, y: b.y };
+        case "left": return { x: b.x - offset, y: b.y };
+        case "top": return { x: b.x, y: b.y - offset };
+        case "bottom": return { x: b.x, y: b.y + offset };
+        default: return { x: (a.x + b.x) / 2, y: b.y };
+      }
+    })();
+    const stroke = canvasColor(e.color) ?? "#888";
+    const path = `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
+    const arrow = e.toEnd !== "none" ? `marker-end="url(#arrow)"` : "";
+    const label = e.label
+      ? `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 6}" font-size="13" fill="var(--text-normal)" text-anchor="middle" class="canvas-edge-label">${escapeHtml(e.label)}</text>`
+      : "";
+    return `<path d="${path}" fill="none" stroke="${stroke}" stroke-width="2" stroke-opacity="0.7" ${arrow}/>${label}`;
+  }).join("\n") ?? "";
+
+  const breadcrumb = renderBreadcrumb(ctx, title);
+
+  return shell({
+    title,
+    wide: true,
+    body: `
+${breadcrumb}
+<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
+<p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s) · scroll/pinch to zoom · drag to pan</p>
+<div class="canvas-host" id="canvas-host">
+  <svg id="canvas-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#888" />
+      </marker>
+    </defs>
+    <g id="canvas-edges">${edgeSvg}</g>
+    <g id="canvas-groups">${groupSvg}</g>
+    <g id="canvas-nodes">${otherSvg}</g>
+  </svg>
+  <button id="canvas-reset" class="graph-reset-btn" type="button" title="Reset view">⌖ Reset view</button>
+</div>
+${CANVAS_PAN_ZOOM}
+`,
+  });
+}
+
+const CANVAS_PAN_ZOOM = `<script>
+(function(){
+  const svg = document.getElementById("canvas-svg");
+  if (!svg) return;
+  const initial = svg.getAttribute("viewBox").split(/\\s+/).map(Number);
+  let [vx, vy, vw, vh] = initial;
+  const apply = () => svg.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
+  const reset = () => { [vx, vy, vw, vh] = initial; apply(); };
+
+  // Wheel zoom (anchored at cursor)
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    const mx = vx + (e.clientX - rect.left) / rect.width * vw;
+    const my = vy + (e.clientY - rect.top) / rect.height * vh;
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    vw *= factor; vh *= factor;
+    vx = mx - (e.clientX - rect.left) / rect.width * vw;
+    vy = my - (e.clientY - rect.top) / rect.height * vh;
+    apply();
+  }, { passive: false });
+
+  // Drag to pan
+  let dragging = false, lastX = 0, lastY = 0;
+  svg.addEventListener("mousedown", (e) => {
+    if (e.target.closest("a, foreignObject a")) return; // don't pan on link drag
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    svg.style.cursor = "grabbing";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const rect = svg.getBoundingClientRect();
+    const dx = (e.clientX - lastX) / rect.width * vw;
+    const dy = (e.clientY - lastY) / rect.height * vh;
+    vx -= dx; vy -= dy;
+    lastX = e.clientX; lastY = e.clientY;
+    apply();
+  });
+  window.addEventListener("mouseup", () => { dragging = false; svg.style.cursor = ""; });
+
+  document.getElementById("canvas-reset")?.addEventListener("click", reset);
+  svg.addEventListener("dblclick", reset);
+})();
+</script>`;
 
 export function renderGateError(message: string): string {
   return shell({
