@@ -6,6 +6,37 @@
 
 ---
 
+## How to use BrainShare — self-hosted by design
+
+BrainShare is **self-hosted, single-tenant**. There is no signup page, no `brainshare.app` to log into. Every user runs their own ~10-minute Cloudflare Worker. Your notes never touch shared infrastructure.
+
+| You're trying to… | Do this |
+|---|---|
+| **Try it for 30 seconds** | Click the live demo link above. Read a published slice. No install. |
+| **Publish your own slices** | [Deploy your own worker (10 min, free)](#quickstart-zero-to-deployed-in-10-minutes) → install the Obsidian plugin → point it at your worker URL |
+| **Share with a teammate (one author)** | They open the URLs you send. They don't deploy anything. Done. |
+| **Share with a team (multiple authors)** | Run one shared worker for the team; put the `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault, etc.). Each author installs the plugin pointing at the same worker. |
+| **Run BrainShare for strangers as a service** | Currently unsupported — see "Why no SaaS" below and ADR-002 in the design vault for the architecture sketch and graduation triggers. |
+
+### Why no SaaS?
+
+Three reasons:
+
+1. **Privacy is the pitch.** "Your private notes never touch my infrastructure" is a feature for the target user (engineers, researchers, founders with secret-sauce notes). A SaaS would dilute that.
+2. **Cost.** Cloudflare's free tier covers ~100k req/day per worker. Self-hosting costs $0 for almost everyone. SaaS would force the operator to absorb everyone's bandwidth + KV ops.
+3. **Operational burden.** Multi-tenant SaaS is a different product (auth, billing, abuse handling, on-call). Build that *only* when there's proven demand.
+
+If you want a hosted version, [open an issue](https://github.com/MachoMaheen/brainshare/issues) — that's a graduation signal documented in ADR-002.
+
+### You cannot share credentials across users
+
+If you hand someone your `PUBLISHER_TOKEN`, they get full read/write/delete on **every** note in your worker, plus your KV bill. Tokens are full-permission, single-tenant. Either:
+
+- **Deploy a worker per user** — true isolation, totally separate KV namespaces
+- **Share one worker as a team** — fine when everyone in the team is trusted (same as sharing a database password)
+
+---
+
 ## Why this exists
 
 You keep an Obsidian vault as a "second brain" — for a codebase, a product, a company. You want to share a *slice* of it (3 notes, or a folder, or a curated subgraph) with a teammate, without exposing the whole vault and without forcing them to install Obsidian. Existing tools (Obsidian Publish, Quartz, Jotbird) publish everything, or one note at a time, and don't let multiple people's brains compose into one shared graph.
@@ -58,9 +89,11 @@ Three packages, one worker:
 
 ## Quickstart (zero to deployed in ~10 minutes)
 
+> This is the path for new users. You'll end up with your own Cloudflare Worker URL and a token that only you have. Your notes go to your KV namespace, not anybody else's.
+
 ### Prerequisites
 
-- Cloudflare account (free tier is fine)
+- Cloudflare account (free tier is fine — sign up at [cloudflare.com](https://cloudflare.com) if you don't have one)
 - Node 20+
 - An Obsidian vault you want to publish from
 
