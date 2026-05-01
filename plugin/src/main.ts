@@ -10,6 +10,21 @@ import {
 import { ulid } from "./ulid";
 import { FolderPickerModal } from "./folder-picker";
 import { MintTokenModal } from "./mint-modal";
+import { SlicesModal } from "./slices-modal";
+import { RevokeTokenModal } from "./revoke-modal";
+
+export interface SliceRecord {
+  title: string;
+  description: string;
+  gated: boolean;
+  ulids: string[];
+  files: string[];
+  publisher: string;
+  created_at: string;
+}
+export type SliceMap = Record<string, SliceRecord>;
+
+export const SLICES_PATH = ".obsidian/brainshare-slices.json";
 
 interface BrainShareSettings {
   publisherUrl: string;
@@ -78,6 +93,32 @@ export default class BrainSharePlugin extends Plugin {
       id: "brainshare-mint-token",
       name: "Mint share token…",
       callback: () => new MintTokenModal(this.app, this).open(),
+    });
+
+    this.addCommand({
+      id: "brainshare-list-slices",
+      name: "List my published slices…",
+      callback: () => new SlicesModal(this.app, this).open(),
+    });
+
+    this.addCommand({
+      id: "brainshare-unpublish-current",
+      name: "Unpublish current note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !file.path.endsWith(".md")) return false;
+        const id = this.app.metadataCache.getFileCache(file)?.frontmatter?.id;
+        if (!id || typeof id !== "string") return false;
+        if (checking) return true;
+        this.unpublishCurrentInteractive(file.path, id);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "brainshare-revoke-token",
+      name: "Revoke share token (by jti)…",
+      callback: () => new RevokeTokenModal(this.app, this).open(),
     });
 
     this.addCommand({
@@ -176,18 +217,7 @@ export default class BrainSharePlugin extends Plugin {
     files: string[];
     publisherUrl: string;
   }): Promise<void> {
-    const path = ".obsidian/brainshare-slices.json";
-    const adapter = this.app.vault.adapter;
-    let data: Record<string, unknown> = {};
-    try {
-      if (await adapter.exists(path)) {
-        const raw = await adapter.read(path);
-        data = JSON.parse(raw);
-      }
-    } catch {
-      // start fresh on parse error
-      data = {};
-    }
+    const data = await this.readSlices();
     data[slice.wrapId] = {
       title: slice.title,
       description: slice.description,
@@ -197,7 +227,93 @@ export default class BrainSharePlugin extends Plugin {
       publisher: slice.publisherUrl,
       created_at: new Date().toISOString(),
     };
-    await adapter.write(path, JSON.stringify(data, null, 2));
+    await this.writeSlices(data);
+  }
+
+  async readSlices(): Promise<SliceMap> {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (await adapter.exists(SLICES_PATH)) {
+        const raw = await adapter.read(SLICES_PATH);
+        return JSON.parse(raw) as SliceMap;
+      }
+    } catch {
+      // fall through, return empty
+    }
+    return {};
+  }
+
+  async writeSlices(data: SliceMap): Promise<void> {
+    await this.app.vault.adapter.write(SLICES_PATH, JSON.stringify(data, null, 2));
+  }
+
+  /** DELETE /api/notes/:ulid — full takedown of a single note */
+  async unpublishNote(noteUlid: string): Promise<boolean> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return false;
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/notes/${noteUlid}`,
+      method: "DELETE",
+      headers: { authorization: `Bearer ${publisherToken}` },
+      throw: false,
+    });
+    return res.status < 400;
+  }
+
+  /** DELETE /api/wrappers/:id — wrapper share URL stops working; standalone notes survive */
+  async deleteWrapper(wrapId: string): Promise<boolean> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return false;
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/wrappers/${wrapId}`,
+      method: "DELETE",
+      headers: { authorization: `Bearer ${publisherToken}` },
+      throw: false,
+    });
+    return res.status < 400;
+  }
+
+  /**
+   * Interactive single-note unpublish. Confirms (because it's destructive),
+   * deletes from the worker, and prunes the ULID from any sidecar slices that
+   * referenced it so the vault's record stays accurate.
+   */
+  async unpublishCurrentInteractive(filePath: string, noteUlid: string): Promise<void> {
+    if (!confirm(`Unpublish "${filePath}"?\n\nThe note will be deleted from the publisher worker. Any wrapper that included it will show this note as missing.`)) {
+      return;
+    }
+    const ok = await this.unpublishNote(noteUlid);
+    if (!ok) {
+      new Notice("BrainShare: unpublish failed (check publisher URL + token)");
+      return;
+    }
+    // Prune the ulid from every slice in the sidecar
+    const slices = await this.readSlices();
+    let touched = false;
+    for (const wrapId of Object.keys(slices)) {
+      const before = slices[wrapId].ulids.length;
+      slices[wrapId].ulids = slices[wrapId].ulids.filter((u) => u !== noteUlid);
+      if (slices[wrapId].ulids.length !== before) touched = true;
+    }
+    if (touched) await this.writeSlices(slices);
+    new Notice(`BrainShare: unpublished ${noteUlid}`);
+  }
+
+  /** POST /api/wrappers/:id/revoke — kill a single recipient's token by jti */
+  async revokeToken(wrapId: string, jti: string): Promise<boolean> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return false;
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/wrappers/${wrapId}/revoke`,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${publisherToken}`,
+      },
+      body: JSON.stringify({ jti }),
+      throw: false,
+    });
+    return res.status < 400;
   }
 
   async publishNote(file: TFile) {
