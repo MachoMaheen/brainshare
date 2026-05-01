@@ -248,6 +248,55 @@ blockquote {
 }
 .note-list a:hover { border-color: var(--text-accent); background: var(--bg-chip); }
 .note-list .folder { font-size: .75em; color: var(--text-faint); display: block; margin-bottom: 2px; }
+.wrap-actions {
+  display: flex; gap: .5em; flex-wrap: wrap;
+  margin: .8em 0 .4em;
+}
+.action-btn {
+  display: inline-flex; align-items: center; gap: .4em;
+  padding: .45em .9em;
+  font-size: .9em;
+  border-radius: 6px;
+  background: var(--text-accent);
+  color: var(--bg-primary) !important;
+  border: 1px solid transparent !important;
+  text-decoration: none !important;
+  transition: opacity .15s;
+}
+.action-btn:hover { opacity: .85; border-color: transparent !important; }
+.action-icon { font-size: 1.05em; }
+.folder-chips {
+  display: flex; flex-wrap: wrap; gap: .4em;
+  margin: .5em 0 1em;
+}
+.folder-chip {
+  display: inline-flex; align-items: center; gap: .35em;
+  padding: .25em .7em;
+  font-size: .8em;
+  border-radius: 999px;
+  background: var(--bg-chip);
+  color: var(--text-accent) !important;
+  border: 1px solid transparent;
+  text-decoration: none !important;
+}
+.folder-chip:hover { border-color: var(--text-accent); border-bottom-color: var(--text-accent); }
+.folder-chip-count {
+  font-size: .85em; opacity: .7; padding: 0 .35em;
+  background: rgba(127,109,242,0.15); border-radius: 6px;
+}
+.folder-heading {
+  display: flex; align-items: center; gap: .5em;
+  font-size: .95em; font-weight: 500;
+  color: var(--text-muted);
+  margin: 1.4em 0 .4em;
+  padding-bottom: .25em;
+  border-bottom: 1px solid var(--border-faint);
+  scroll-margin-top: 1em;
+}
+.folder-heading .folder-icon { color: var(--text-faint); }
+.folder-heading .folder-count {
+  margin-left: auto; font-size: .8em; color: var(--text-faint); font-weight: normal;
+}
 .note-list .title  { font-weight: 500; }
 .note-list .ulid   { font-size: .7em; color: var(--text-faint); display: block; margin-top: 2px; font-family: "SF Mono", Menlo, monospace; }
 .note-list .missing a { opacity: .5; text-decoration: line-through; }
@@ -533,8 +582,15 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
   const title = (fm?.byKey.get("title") as string) ?? ulid;
 
   const tq = ctx?.tokenQuery ?? "";
+  // Strip a leading H1 that duplicates the title — otherwise the page renders
+  // its title twice (once from <h1> below, once from the markdown's own # heading).
+  const dedupedBody = rawBody.replace(
+    /^\s*#\s+(.+?)\s*$/m,
+    (match, heading: string) =>
+      heading.trim().toLowerCase() === title.trim().toLowerCase() ? "" : match
+  );
   // Resolve wikilinks (in markdown, before marked sees them, so internal ones survive as raw HTML)
-  const body = rawBody.replace(
+  const body = dedupedBody.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_m, target: string, alias?: string) => {
       const targetTrim = target.trim();
@@ -567,10 +623,24 @@ function renderBreadcrumb(ctx: RenderCtx | undefined, title: string): string {
   const back = scoped
     ? `<a href="${ctx!.shareBase}${tq}">← share</a><span class="sep">/</span>`
     : "";
-  const folder = ctx?.path
-    ? ctx.path.split("/").slice(0, -1).map(escapeHtml).join('<span class="sep">/</span>')
+  // Each folder segment becomes a clickable anchor back to the wrapper landing's
+  // folder section. Slug must match the section id generated in renderWrapper.
+  const folderSegments: string[] = [];
+  if (ctx?.path) {
+    const parts = ctx.path.split("/").slice(0, -1);
+    for (let i = 0; i < parts.length; i++) {
+      const folderPath = parts.slice(0, i + 1).join("/");
+      const slug = folderPath.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const text = escapeHtml(parts[i]);
+      const seg = scoped
+        ? `<a href="${ctx!.shareBase}${tq}#folder-${slug}">${text}</a>`
+        : text;
+      folderSegments.push(seg);
+    }
+  }
+  const folderPart = folderSegments.length
+    ? `${folderSegments.join('<span class="sep">/</span>')}<span class="sep">/</span>`
     : "";
-  const folderPart = folder ? `${folder}<span class="sep">/</span>` : "";
   const badge = !scoped
     ? `<span class="scope-badge">standalone</span>`
     : ctx?.gated
@@ -625,11 +695,39 @@ export async function renderWrapper(
   const shareBase = `${origin}/share/${wrapId}`;
   const tq = tokenQuery;
 
-  const items = records.map(r => {
+  // Group notes by folder so the landing page mirrors Obsidian's file explorer
+  // instead of being a flat dump.
+  const groups = new Map<string, typeof records>();
+  for (const r of records) {
     const folder = r.path.includes("/") ? r.path.split("/").slice(0, -1).join("/") : "";
-    const cls = r.md ? "" : "missing";
-    return `<li class="${cls}"><a href="${shareBase}/${r.ulid}${tq}">${folder ? `<span class="folder">${escapeHtml(folder)}</span>` : ""}<span class="title">${escapeHtml(r.title)}</span><span class="ulid">${r.ulid}</span></a></li>`;
+    if (!groups.has(folder)) groups.set(folder, []);
+    groups.get(folder)!.push(r);
+  }
+  const folderOrder = [...groups.keys()].sort((a, b) => {
+    if (a === "" && b !== "") return 1;
+    if (b === "" && a !== "") return -1;
+    return a.localeCompare(b);
   });
+  const folderSections = folderOrder.map((folder) => {
+    const slug = folder ? folder.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "root";
+    const heading = folder
+      ? `<h3 class="folder-heading" id="folder-${slug}"><span class="folder-icon">📁</span>${escapeHtml(folder)} <span class="folder-count">${groups.get(folder)!.length}</span></h3>`
+      : `<h3 class="folder-heading" id="folder-root"><span class="folder-icon">·</span>vault root <span class="folder-count">${groups.get(folder)!.length}</span></h3>`;
+    const lis = groups.get(folder)!.map((r) => {
+      const cls = r.md ? "" : "missing";
+      return `<li class="${cls}"><a href="${shareBase}/${r.ulid}${tq}"><span class="title">${escapeHtml(r.title)}</span><span class="ulid">${r.ulid}</span></a></li>`;
+    });
+    return `${heading}<ul class="note-list">${lis.join("")}</ul>`;
+  });
+
+  // Folder breadcrumb chips at the top of the wrapper for quick navigation
+  const folderChips = folderOrder
+    .filter((f) => f !== "")
+    .map((folder) => {
+      const slug = folder.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      return `<a class="folder-chip" href="#folder-${slug}">${escapeHtml(folder)}<span class="folder-chip-count">${groups.get(folder)!.length}</span></a>`;
+    })
+    .join("");
 
   const graphData = {
     wrapId,
@@ -653,15 +751,21 @@ export async function renderWrapper(
 <div class="wrap-header">
   <h1>${escapeHtml(wrap.title ?? "Shared slice")} ${gatedBadge}</h1>
   ${wrap.description ? `<p class="desc">${escapeHtml(wrap.description)}</p>` : ""}
+  <div class="wrap-actions">
+    <a class="action-btn" href="${shareBase}/download${tq}" download>
+      <span class="action-icon">⬇</span> Download as Obsidian vault (.zip)
+    </a>
+  </div>
+  ${folderChips ? `<div class="folder-chips">${folderChips}</div>` : ""}
 </div>
 
 <div id="graph-host">
-  <span class="graph-help">drag · scroll to zoom · click a node to open</span>
+  <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus</span>
   <div id="graph" style="width:100%;height:100%"></div>
 </div>
 
 <h2 style="margin-top:1em">Notes in this slice</h2>
-<ul class="note-list">${items.join("")}</ul>
+${folderSections.join("")}
 
 <div class="wrap-meta">${records.length} note(s) · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 
@@ -675,61 +779,115 @@ export async function renderWrapper(
     return;
   }
   var g = new graphology.Graph();
-  var folders = {};
-  var palette = ["#a882ff","#00b8b8","#08b94e","#e0ac00","#086ddd","#e93147","#8b8b8b","#ff7eb6","#7c83fd","#34c4d9"];
+  var styles = getComputedStyle(document.body);
+  var accent     = (styles.getPropertyValue("--text-accent").trim() || "#a882ff");
+  var nodeColor  = (styles.getPropertyValue("--text-muted").trim()  || "#8a8a8a");
+  var edgeColor  = (styles.getPropertyValue("--border").trim()      || "#363636");
+  var labelColor = (styles.getPropertyValue("--text-normal").trim() || "#dcddde");
+  var dimColor   = "rgba(140,140,140,0.18)";
+
+  // Degree → node size (Obsidian's "more links → bigger node")
+  var degree = {};
+  DATA.edges.forEach(function(e){
+    if (e.from === e.to) return;
+    degree[e.from] = (degree[e.from] || 0) + 1;
+    degree[e.to]   = (degree[e.to]   || 0) + 1;
+  });
+
   DATA.nodes.forEach(function(n,i){
-    if (!folders.hasOwnProperty(n.folder)) folders[n.folder] = palette[Object.keys(folders).length % palette.length];
     var theta = (i / DATA.nodes.length) * 2 * Math.PI;
+    var d = degree[n.id] || 0;
     g.addNode(n.id, {
       label: n.label,
       x: Math.cos(theta), y: Math.sin(theta),
-      size: 8,
-      color: folders[n.folder],
+      size: 5 + Math.min(d, 10) * 1.1,
+      color: nodeColor,
     });
   });
   DATA.edges.forEach(function(e){
-    if (g.hasNode(e.from) && g.hasNode(e.to) && !g.hasEdge(e.from, e.to)) {
-      g.addEdge(e.from, e.to, { size: 1, color: getComputedStyle(document.body).getPropertyValue("--border") });
+    if (g.hasNode(e.from) && g.hasNode(e.to) && !g.hasEdge(e.from, e.to) && e.from !== e.to) {
+      g.addEdge(e.from, e.to, { size: 1, color: edgeColor });
     }
   });
-  // Tiny custom force: pull connected nodes together, push everyone else apart.
-  for (var iter = 0; iter < 80; iter++) {
-    var positions = {};
-    g.forEachNode(function(n, attrs){ positions[n] = { x: attrs.x, y: attrs.y, fx: 0, fy: 0 }; });
+
+  // Force-directed settle. Repulsion (inverse-square) + spring (along edges)
+  // with cooling to prevent oscillation. Tuned so nodes spread to readable spacing.
+  var ITERATIONS = 180;
+  var REST_LEN = 1.5;
+  var REPULSION = 0.15;
+  for (var iter = 0; iter < ITERATIONS; iter++) {
+    var alpha = 1 - iter / ITERATIONS; // cooling: forces shrink over time
+    var pos = {};
+    g.forEachNode(function(n, a){ pos[n] = { x: a.x, y: a.y, fx: 0, fy: 0 }; });
     g.forEachNode(function(n1){
       g.forEachNode(function(n2){
         if (n1 === n2) return;
-        var dx = positions[n1].x - positions[n2].x;
-        var dy = positions[n1].y - positions[n2].y;
-        var d2 = dx*dx + dy*dy + 0.001;
-        var f = 0.04 / d2;
-        positions[n1].fx += dx * f;
-        positions[n1].fy += dy * f;
+        var dx = pos[n1].x - pos[n2].x;
+        var dy = pos[n1].y - pos[n2].y;
+        var d2 = dx*dx + dy*dy + 0.01;
+        var f = REPULSION / d2;
+        pos[n1].fx += dx * f;
+        pos[n1].fy += dy * f;
       });
     });
-    g.forEachEdge(function(e, _, src, tgt){
-      var dx = positions[tgt].x - positions[src].x;
-      var dy = positions[tgt].y - positions[src].y;
+    g.forEachEdge(function(_e, _a, src, tgt){
+      var dx = pos[tgt].x - pos[src].x;
+      var dy = pos[tgt].y - pos[src].y;
       var d  = Math.sqrt(dx*dx + dy*dy) + 0.01;
-      var f  = (d - 0.5) * 0.05;
-      positions[src].fx += dx/d * f;
-      positions[src].fy += dy/d * f;
-      positions[tgt].fx -= dx/d * f;
-      positions[tgt].fy -= dy/d * f;
+      var f  = (d - REST_LEN) * 0.08;
+      pos[src].fx += dx/d * f;
+      pos[src].fy += dy/d * f;
+      pos[tgt].fx -= dx/d * f;
+      pos[tgt].fy -= dy/d * f;
     });
     g.forEachNode(function(n){
-      g.setNodeAttribute(n, "x", positions[n].x + positions[n].fx);
-      g.setNodeAttribute(n, "y", positions[n].y + positions[n].fy);
+      // clamp per-step displacement so a single bad iteration can't fling a node off-canvas
+      var fx = Math.max(-0.5, Math.min(0.5, pos[n].fx * alpha));
+      var fy = Math.max(-0.5, Math.min(0.5, pos[n].fy * alpha));
+      g.setNodeAttribute(n, "x", pos[n].x + fx);
+      g.setNodeAttribute(n, "y", pos[n].y + fy);
     });
   }
+
   var renderer = new Sigma(g, document.getElementById("graph"), {
-    labelColor: { color: getComputedStyle(document.body).getPropertyValue("--text-normal") || "#dcddde" },
+    labelColor: { color: labelColor },
     labelSize: 12,
+    labelDensity: 0.7,
+    labelGridCellSize: 80,
     renderEdgeLabels: false,
+    defaultEdgeColor: edgeColor,
+    minCameraRatio: 0.1,
+    maxCameraRatio: 4,
+  });
+
+  // Hover-dim implemented via direct attribute mutation — simpler and more reliable
+  // than reducers in sigma 2.4. Cache originals so we can restore on leave.
+  var origNodeColor = {}, origNodeSize = {}, origEdgeColor = {};
+  g.forEachNode(function(n, a){ origNodeColor[n] = a.color; origNodeSize[n] = a.size; });
+  g.forEachEdge(function(e, a){ origEdgeColor[e] = a.color; });
+
+  renderer.on("enterNode", function(p){
+    var hovered = p.node;
+    var neighbors = {}; neighbors[hovered] = true;
+    g.forEachNeighbor(hovered, function(nb){ neighbors[nb] = true; });
+    g.forEachNode(function(n){
+      if (neighbors[n]) {
+        g.setNodeAttribute(n, "color", n === hovered ? accent : origNodeColor[n]);
+      } else {
+        g.setNodeAttribute(n, "color", dimColor);
+      }
+    });
+    g.forEachEdge(function(e, _a, src, tgt){
+      g.setEdgeAttribute(e, "color", (neighbors[src] && neighbors[tgt]) ? accent : dimColor);
+    });
+    document.body.style.cursor = "pointer";
+  });
+  renderer.on("leaveNode", function(){
+    g.forEachNode(function(n){ g.setNodeAttribute(n, "color", origNodeColor[n]); });
+    g.forEachEdge(function(e){ g.setEdgeAttribute(e, "color", origEdgeColor[e]); });
+    document.body.style.cursor = "";
   });
   renderer.on("clickNode", function(p){ window.location = "/share/" + DATA.wrapId + "/" + p.node + DATA.tokenQuery; });
-  renderer.on("enterNode", function(){ document.body.style.cursor = "pointer"; });
-  renderer.on("leaveNode", function(){ document.body.style.cursor = ""; });
 })();
 </script>
 `,

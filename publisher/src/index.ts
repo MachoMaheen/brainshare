@@ -3,10 +3,12 @@ import {
   renderWrapper,
   renderGateError,
   buildShareSet,
+  loadNotes,
   NoteMeta,
   WrapData,
 } from "./render";
 import { signJWT, verifyJWT, TokenClaims } from "./jwt";
+import { zipSync } from "fflate";
 
 interface Env {
   NOTES: KVNamespace;
@@ -254,6 +256,48 @@ export default {
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
+    }
+
+    // GET /share/:wrapId/download — return the slice as a zipped Obsidian-compatible vault
+    const downloadMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})\/download$/);
+    if (downloadMatch && req.method === "GET") {
+      const wrapId = downloadMatch[1];
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return html("<h1>404</h1><p>wrapper not found</p>", 404);
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      const gate = await checkGate(env, wrap, wrapId, url);
+      if (!gate.ok) return gate.resp;
+
+      const records = await loadNotes(env.NOTES, wrap.ulids);
+      const files: Record<string, Uint8Array> = {};
+      const enc = new TextEncoder();
+      for (const r of records) {
+        if (!r.md) continue;
+        // Preserve original vault path so the ZIP round-trips into any Obsidian vault.
+        const filePath = r.path || `${r.ulid}.md`;
+        files[filePath] = enc.encode(r.md);
+      }
+      // Bundle a manifest so re-importers know which wrapper this came from + which
+      // ULIDs the slice contained — needed for the future sync/contribute-back flow.
+      files["brainshare.json"] = enc.encode(JSON.stringify({
+        wrapId,
+        title: wrap.title ?? null,
+        description: wrap.description ?? null,
+        gated: !!wrap.gated,
+        ulids: wrap.ulids,
+        created_at: wrap.created_at ?? null,
+        publisher: origin,
+        exported_at: new Date().toISOString(),
+      }, null, 2));
+
+      const zipped = zipSync(files);
+      return new Response(zipped, {
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="${wrapId}.zip"`,
+          "cache-control": "no-store",
+        },
+      });
     }
 
     // GET /share/:wrapId/:ulid — note scoped to a wrapper's share-set

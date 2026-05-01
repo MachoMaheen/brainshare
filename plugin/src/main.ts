@@ -9,6 +9,7 @@ import {
 } from "obsidian";
 import { ulid } from "./ulid";
 import { FolderPickerModal } from "./folder-picker";
+import { MintTokenModal } from "./mint-modal";
 
 interface BrainShareSettings {
   publisherUrl: string;
@@ -69,8 +70,14 @@ export default class BrainSharePlugin extends Plugin {
 
     this.addCommand({
       id: "brainshare-publish-folder",
-      name: "Publish folder(s)…",
+      name: "Publish slice (folders + notes)…",
       callback: () => new FolderPickerModal(this.app, this).open(),
+    });
+
+    this.addCommand({
+      id: "brainshare-mint-token",
+      name: "Mint share token…",
+      callback: () => new MintTokenModal(this.app, this).open(),
     });
 
     this.addCommand({
@@ -129,6 +136,68 @@ export default class BrainSharePlugin extends Plugin {
       throw: false,
     });
     return res.status < 400 ? id : null;
+  }
+
+  /**
+   * Mint a JWT for a gated wrapper. Returns the token bundle (jti + jwt + url + exp)
+   * or null on failure. Caller decides how to surface results.
+   */
+  async mintToken(
+    wrapId: string,
+    opts: { exp_days?: number; exp_seconds?: number; max_views?: number; viewer?: string }
+  ): Promise<{ jti: string; jwt: string; url: string; exp: number } | null> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return null;
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/wrappers/${wrapId}/tokens`,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${publisherToken}`,
+      },
+      body: JSON.stringify(opts),
+      throw: false,
+    });
+    if (res.status >= 400) return null;
+    return res.json as { jti: string; jwt: string; url: string; exp: number };
+  }
+
+  /**
+   * Persist a published slice to .obsidian/brainshare-slices.json so the
+   * vault stays the source of truth for what's been shared (re-publish, audit,
+   * eventual filtered-graph view).
+   */
+  async recordSlice(slice: {
+    wrapId: string;
+    title: string;
+    description: string;
+    gated: boolean;
+    ulids: string[];
+    files: string[];
+    publisherUrl: string;
+  }): Promise<void> {
+    const path = ".obsidian/brainshare-slices.json";
+    const adapter = this.app.vault.adapter;
+    let data: Record<string, unknown> = {};
+    try {
+      if (await adapter.exists(path)) {
+        const raw = await adapter.read(path);
+        data = JSON.parse(raw);
+      }
+    } catch {
+      // start fresh on parse error
+      data = {};
+    }
+    data[slice.wrapId] = {
+      title: slice.title,
+      description: slice.description,
+      gated: slice.gated,
+      ulids: slice.ulids,
+      files: slice.files,
+      publisher: slice.publisherUrl,
+      created_at: new Date().toISOString(),
+    };
+    await adapter.write(path, JSON.stringify(data, null, 2));
   }
 
   async publishNote(file: TFile) {

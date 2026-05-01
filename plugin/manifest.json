@@ -1,7 +1,7 @@
 {
   "id": "brainshare",
   "name": "BrainShare",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.5.0",
   "description": "Selectively publish slices of your second brain. Stamps ULIDs, publishes notes, generates shareable wrappers.",
   "author": "Maheen",
