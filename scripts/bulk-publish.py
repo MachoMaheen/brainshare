@@ -93,6 +93,10 @@ def main() -> int:
     for md in sorted(vault.rglob("*.md")):
         if ".obsidian" in md.parts:
             continue
+        # Folders sometimes get a .md suffix (rare, but real — Obsidian doesn't
+        # forbid it). rglob picks them up; read_text would crash on a directory.
+        if not md.is_file():
+            continue
         text = md.read_text(encoding="utf-8")
         new_text, ulid_, stamped = stamp(text)
         if stamped:
