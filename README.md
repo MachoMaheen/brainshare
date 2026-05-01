@@ -16,7 +16,7 @@ BrainShare is **self-hosted, single-tenant**. There is no signup page, no `brain
 | **Publish your own slices** | [Deploy your own worker (10 min, free)](#quickstart-zero-to-deployed-in-10-minutes) → install the Obsidian plugin → point it at your worker URL |
 | **Share with a teammate (one author)** | They open the URLs you send. They don't deploy anything. Done. |
 | **Share with a team (multiple authors)** | Run one shared worker for the team; put the `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault, etc.). Each author installs the plugin pointing at the same worker. |
-| **Run BrainShare for strangers as a service** | Currently unsupported — see "Why no SaaS" below and ADR-002 in the design vault for the architecture sketch and graduation triggers. |
+| **Run BrainShare for strangers as a service** | Currently unsupported — see ["Why no SaaS"](#why-no-saas) below, plus [ADR-002](https://brainshare-publisher.machomaheen.workers.dev/share/adr-002-saas-rationale) for the full graduation triggers and multi-tenant architecture sketch. |
 
 ### Why no SaaS?
 
@@ -26,7 +26,7 @@ Three reasons:
 2. **Cost.** Cloudflare's free tier covers ~100k req/day per worker. Self-hosting costs $0 for almost everyone. SaaS would force the operator to absorb everyone's bandwidth + KV ops.
 3. **Operational burden.** Multi-tenant SaaS is a different product (auth, billing, abuse handling, on-call). Build that *only* when there's proven demand.
 
-If you want a hosted version, [open an issue](https://github.com/MachoMaheen/brainshare/issues) — that's a graduation signal documented in ADR-002.
+If you want a hosted version, [open an issue](https://github.com/MachoMaheen/brainshare/issues) — that's a graduation signal documented in [ADR-002](https://brainshare-publisher.machomaheen.workers.dev/share/adr-002-saas-rationale).
 
 ### You cannot share credentials across users
 
