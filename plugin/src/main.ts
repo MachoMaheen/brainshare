@@ -8,6 +8,7 @@ import {
   requestUrl,
 } from "obsidian";
 import { ulid } from "./ulid";
+import { FolderPickerModal } from "./folder-picker";
 
 interface BrainShareSettings {
   publisherUrl: string;
@@ -67,6 +68,12 @@ export default class BrainSharePlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "brainshare-publish-folder",
+      name: "Publish folder(s)…",
+      callback: () => new FolderPickerModal(this.app, this).open(),
+    });
+
+    this.addCommand({
       id: "brainshare-copy-current-id",
       name: "Copy current note ULID",
       checkCallback: (checking) => {
@@ -98,35 +105,42 @@ export default class BrainSharePlugin extends Plugin {
     return didStamp;
   }
 
+  /**
+   * Push a single note to the worker. Stamps a ULID first if missing.
+   * Returns the ULID on success, null on failure. Does NOT show notices —
+   * caller decides how to surface results (single note vs bulk).
+   */
+  async publishNoteSilent(file: TFile): Promise<string | null> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return null;
+    await this.stampUlid(file);
+    const id = this.app.metadataCache.getFileCache(file)?.frontmatter?.id;
+    if (!id) return null;
+    const content = await this.app.vault.read(file);
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/notes/${id}`,
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        authorization: `Bearer ${publisherToken}`,
+        "x-note-path": file.path,
+      },
+      body: content,
+      throw: false,
+    });
+    return res.status < 400 ? id : null;
+  }
+
   async publishNote(file: TFile) {
     const { publisherUrl, publisherToken } = this.settings;
     if (!publisherUrl || !publisherToken) {
       new Notice("BrainShare: configure publisher URL + token in settings");
       return;
     }
-    await this.stampUlid(file);
-    const cache = this.app.metadataCache.getFileCache(file);
-    const id = cache?.frontmatter?.id;
-    if (!id) {
-      new Notice("BrainShare: could not derive ULID");
-      return;
-    }
-    const content = await this.app.vault.read(file);
     try {
-      // requestUrl() bypasses the renderer's CORS restrictions that block fetch()
-      const res = await requestUrl({
-        url: `${publisherUrl}/api/notes/${id}`,
-        method: "PUT",
-        headers: {
-          "content-type": "text/markdown",
-          authorization: `Bearer ${publisherToken}`,
-          "x-note-path": file.path,
-        },
-        body: content,
-        throw: false,
-      });
-      if (res.status >= 400) {
-        new Notice(`BrainShare: publish failed (${res.status}) ${res.text ?? ""}`);
+      const id = await this.publishNoteSilent(file);
+      if (!id) {
+        new Notice("BrainShare: publish failed (check publisher URL/token + console)");
         return;
       }
       const publicUrl = `${publisherUrl}/${id}`;

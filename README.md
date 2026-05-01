@@ -15,6 +15,7 @@ BrainShare's bet: the value of a second brain isn't the notes — it's the **cur
 ## Features
 
 - **Per-note publishing** — every note gets a stable ULID and a `/<ulid>` public URL
+- **Folder publishing** — pick one or more folders from a tree modal, all `.md` notes inside get stamped + published + bundled into a wrapper share URL in one click
 - **Scoped wrapper URLs** — `/share/<wrap-id>/<ulid>` views render wikilinks as navigable internal links *only when the target is in the same share-set*; everything else stays as a "private" pill
 - **Force-directed subgraph viewer** — sigma.js graph of the shared notes on the wrapper landing page; click a node to open it
 - **Obsidian-style chrome** — palette match, callouts (`> [!abstract]` etc.) rendered as colored boxes with icons, properties panel, folder breadcrumb, dark mode
@@ -114,9 +115,11 @@ After install (either path): **Settings → Community plugins → enable BrainSh
 
 Run command **"BrainShare: Stamp ULIDs into all notes"** to retroactively stamp existing notes. New notes auto-stamp on creation.
 
-### 3. Publish a note
+### 3. Publish
 
-Open any note → **Cmd+P → "BrainShare: Publish current note"**. The note's URL is copied to your clipboard. Open it in a browser.
+**Single note:** open any note → **Cmd+P → "BrainShare: Publish current note"**. The note's URL is copied to your clipboard.
+
+**Whole folder(s):** **Cmd+P → "BrainShare: Publish folder(s)…"**. A modal opens with your vault's folder tree — check the folders you want, set a wrapper title, optionally toggle `Gated`, and click Publish. Every `.md` inside the chosen folders gets ULID-stamped, pushed, and bundled into one wrapper share URL.
 
 ### 4. Bundle multiple notes into a shareable wrapper
 
