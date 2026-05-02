@@ -1195,8 +1195,11 @@ export async function renderWrapper(
       id: n.id,
       label: n.label,
       folder: n.folder,
-      size: 5 + Math.min(d, 10) * 1.2,
-      x: Math.cos(theta) * 80, // initial seed on a circle, scaled to layout space
+      // Match Obsidian: small base node + small degree-bonus. Range 3 → 8 across the
+      // graph. Hub nodes are still distinguishable but never become 17px blobs that
+      // crowd their neighbours.
+      size: 3 + Math.min(d, 10) * 0.5,
+      x: Math.cos(theta) * 80,
       y: Math.sin(theta) * 80,
     };
   });
@@ -1210,15 +1213,17 @@ export async function renderWrapper(
     //   - link distance: 50         → comfortable spacing between connected pairs
     //   - center pull: weak (0.05)  → keeps centroid at origin without crushing layout
     //   - collide: by node size + label gutter so labels rarely overlap
+    // Tuned for Obsidian-like spread: longer links, stronger repulsion, generous
+    // collision radius so labels have room to render without overlapping.
     var sim = d3.forceSimulation(sized)
-      .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(50).strength(0.3))
-      .force("charge", d3.forceManyBody().strength(-180).distanceMax(500))
-      .force("center", d3.forceCenter(0, 0).strength(0.15))
-      .force("x", d3.forceX(0).strength(0.05))
-      .force("y", d3.forceY(0).strength(0.05))
-      .force("collide", d3.forceCollide().radius(function(d){ return d.size + 12; }).strength(0.9))
+      .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(80).strength(0.2))
+      .force("charge", d3.forceManyBody().strength(-260).distanceMax(700))
+      .force("center", d3.forceCenter(0, 0).strength(0.12))
+      .force("x", d3.forceX(0).strength(0.04))
+      .force("y", d3.forceY(0).strength(0.04))
+      .force("collide", d3.forceCollide().radius(function(d){ return d.size + 18; }).strength(0.95))
       .stop();
-    var ticks = Math.max(200, Math.min(500, Math.round(120 * Math.log2(sized.length + 2))));
+    var ticks = Math.max(250, Math.min(600, Math.round(140 * Math.log2(sized.length + 2))));
     for (var t = 0; t < ticks; t++) sim.tick();
   }
 
@@ -1266,13 +1271,14 @@ export async function renderWrapper(
 
   var renderer = new Sigma(g, document.getElementById("graph"), {
     labelColor: { color: labelColor },
-    labelSize: 12,
-    // Sparser labels for large graphs — Sigma drops labels that don't fit at
-    // current zoom. With 100+ nodes the lower density prevents the soup-of-text
-    // problem visible on the wrapper landing previously.
-    labelDensity: DATA.nodes.length > 50 ? 0.25 : 0.7,
-    labelGridCellSize: DATA.nodes.length > 50 ? 140 : 80,
-    labelRenderedSizeThreshold: DATA.nodes.length > 50 ? 8 : 0,
+    labelSize: 11,
+    labelWeight: "400",
+    // Match Obsidian: only show labels for nodes that are big enough AND don't
+    // collide with each other in the label grid. At default zoom only hubs show
+    // labels; zoom in to reveal more.
+    labelDensity: DATA.nodes.length > 50 ? 0.1 : 0.4,
+    labelGridCellSize: DATA.nodes.length > 50 ? 180 : 100,
+    labelRenderedSizeThreshold: DATA.nodes.length > 50 ? 4.5 : 1,
     renderEdgeLabels: false,
     defaultEdgeColor: edgeColor,
     minCameraRatio: 0.05,
