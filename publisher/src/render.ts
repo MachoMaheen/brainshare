@@ -1853,11 +1853,25 @@ ${canvasBody}
 const CANVAS_PAN_ZOOM = `<script>
 (function(){
   const svg = document.getElementById("canvas-svg");
-  if (!svg) return;
+  const host = document.getElementById("canvas-host");
+  if (!svg || !host) return;
   const initial = svg.getAttribute("viewBox").split(/\\s+/).map(Number);
   let [vx, vy, vw, vh] = initial;
   const apply = () => svg.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
   const reset = () => { [vx, vy, vw, vh] = initial; apply(); };
+
+  // Safari workaround — without explicit pixel width/height attributes on
+  // the SVG, Safari fails to apply the viewBox transform to <foreignObject>
+  // children, so canvas cards render at native size and overflow the host.
+  // Setting concrete attributes (and refreshing on resize) makes Safari
+  // honour preserveAspectRatio + viewBox the same way Chrome/Firefox do.
+  const fitSvg = () => {
+    const rect = host.getBoundingClientRect();
+    svg.setAttribute("width", Math.max(1, Math.floor(rect.width)));
+    svg.setAttribute("height", Math.max(1, Math.floor(rect.height)));
+  };
+  fitSvg();
+  window.addEventListener("resize", fitSvg);
 
   // Wheel zoom (anchored at cursor)
   svg.addEventListener("wheel", (e) => {
