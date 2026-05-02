@@ -662,6 +662,83 @@ blockquote {
   border-bottom: none !important;
 }
 .sidebar-title-link:hover { color: var(--text-accent) !important; }
+
+/* Command palette (⌘K) */
+.cmd-palette, .cmd-help {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 14vh;
+}
+.cmd-palette[hidden], .cmd-help[hidden] { display: none; }
+.cmd-palette-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(2px);
+}
+.cmd-palette-modal, .cmd-help-card {
+  position: relative;
+  width: min(560px, 92vw);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.cmd-input {
+  width: 100%; box-sizing: border-box;
+  padding: 14px 18px;
+  font-size: 15px;
+  background: transparent;
+  color: var(--text-normal);
+  border: 0;
+  border-bottom: 1px solid var(--border-faint);
+  outline: none;
+  font-family: inherit;
+}
+.cmd-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.cmd-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+.cmd-item.selected { background: var(--bg-chip); color: var(--text-accent); }
+.cmd-icon { font-size: 14px; opacity: .8; flex: 0 0 auto; width: 18px; }
+.cmd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-hint {
+  font-size: 12px; color: var(--text-faint);
+  flex: 0 0 auto; max-width: 40%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cmd-empty { padding: 24px; text-align: center; color: var(--text-faint); font-size: 13px; }
+.cmd-footer {
+  display: flex; gap: 16px; justify-content: flex-end;
+  padding: 8px 14px;
+  font-size: 11px; color: var(--text-faint);
+  border-top: 1px solid var(--border-faint);
+  background: var(--bg-secondary);
+}
+.cmd-footer kbd, .cmd-help kbd {
+  background: var(--kbd-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-normal);
+}
+.cmd-help-card { padding: 18px 22px 16px; }
+.cmd-help-card h3 { margin: 0 0 12px; font-size: 14px; color: var(--text-normal); }
+.cmd-help-card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmd-help-card td { padding: 5px 8px; vertical-align: top; }
+.cmd-help-card td:first-child { width: 40%; color: var(--text-muted); white-space: nowrap; }
+.cmd-help-card td:last-child  { color: var(--text-normal); }
+.cmd-help-foot { margin: 12px 0 0; font-size: 12px; color: var(--text-faint); border-top: 1px solid var(--border-faint); padding-top: 10px; }
 @media (max-width: 760px) {
   .wrap-shell { flex-direction: column; }
   .wrap-sidebar {
@@ -1144,6 +1221,225 @@ const SIDEBAR_TOGGLE_JS = `<script>
 })();
 </script>`;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Command palette (⌘K) — shared modal that fuzzy-searches every note + canvas
+// in the current wrapper plus a few app-level actions. Lives on the wrapper
+// landing AND on every note/canvas page so navigation never requires a click.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PaletteItem {
+  kind: "note" | "canvas" | "action";
+  id: string;       // ulid for files; action-id for actions
+  label: string;
+  hint?: string;    // folder path or action description
+  href?: string;    // navigation target for files
+  action?: "toggle-sidebar" | "copy-link" | "fullscreen";
+}
+
+export function renderCommandPalette(opts: {
+  shareBase: string;
+  tokenQuery: string;
+  notes: NoteLite[];
+  canvases: CanvasLite[];
+  hasSidebar: boolean;
+}): string {
+  const tq = opts.tokenQuery;
+  const items: PaletteItem[] = [];
+
+  for (const n of opts.notes) {
+    const folder = n.path.includes("/") ? n.path.split("/").slice(0, -1).join("/") : "";
+    const fileName = n.path.split("/").pop()?.replace(/\.md$/i, "") ?? n.basename;
+    items.push({
+      kind: "note",
+      id: n.ulid,
+      label: n.title || fileName,
+      hint: folder,
+      href: `${opts.shareBase}/${n.ulid}${tq}`,
+    });
+  }
+  for (const c of opts.canvases) {
+    const folder = c.path.includes("/") ? c.path.split("/").slice(0, -1).join("/") : "";
+    const fileName = c.path.split("/").pop()?.replace(/\.canvas$/i, "") ?? c.basename;
+    items.push({
+      kind: "canvas",
+      id: c.ulid,
+      label: fileName,
+      hint: folder,
+      href: `${opts.shareBase}/c/${c.ulid}${tq}`,
+    });
+  }
+  // App-level actions appear at the top of the unfiltered list
+  items.unshift(
+    { kind: "action", id: "back", label: "Back to overview", hint: "wrapper landing", href: `${opts.shareBase}${tq}` },
+    { kind: "action", id: "download", label: "Download as .zip", hint: "full slice + assets", href: `${opts.shareBase}/download${tq}` },
+    { kind: "action", id: "copy-link", label: "Copy share link", hint: "current page URL", action: "copy-link" },
+  );
+  if (opts.hasSidebar) {
+    items.splice(2, 0, { kind: "action", id: "toggle-sidebar", label: "Toggle sidebar", hint: "show / hide files", action: "toggle-sidebar" });
+  }
+
+  return `<div class="cmd-palette" id="cmd-palette" hidden>
+  <div class="cmd-palette-backdrop" id="cmd-backdrop"></div>
+  <div class="cmd-palette-modal" role="dialog" aria-label="Command palette">
+    <input type="text" id="cmd-input" class="cmd-input" placeholder="Search notes, canvases, actions… (⌘K)" autocomplete="off" spellcheck="false">
+    <div class="cmd-list" id="cmd-list"></div>
+    <div class="cmd-footer">
+      <span><kbd>↑↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+<div class="cmd-help" id="cmd-help" hidden>
+  <div class="cmd-palette-backdrop" id="cmd-help-backdrop"></div>
+  <div class="cmd-help-card">
+    <h3>Keyboard shortcuts</h3>
+    <table>
+      <tr><td><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> / <kbd>/</kbd></td><td>Open command palette</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Show this sheet</td></tr>
+      ${opts.hasSidebar ? '<tr><td><kbd>[</kbd></td><td>Toggle sidebar</td></tr>' : ""}
+      <tr><td><kbd>g</kbd> <kbd>h</kbd></td><td>Back to wrapper overview</td></tr>
+      <tr><td><kbd>esc</kbd></td><td>Close any overlay</td></tr>
+    </table>
+    <p class="cmd-help-foot">On canvas pages: <kbd>=</kbd>/<kbd>-</kbd> zoom, <kbd>F</kbd> fit, <kbd>R</kbd> reset, <kbd>⇧F</kbd> fullscreen.</p>
+  </div>
+</div>
+<script>
+(function(){
+  var ITEMS = ${JSON.stringify(items)};
+  var SHARE_BASE = ${JSON.stringify(opts.shareBase + tq)};
+  var palette = document.getElementById("cmd-palette");
+  var input   = document.getElementById("cmd-input");
+  var list    = document.getElementById("cmd-list");
+  var help    = document.getElementById("cmd-help");
+  if (!palette || !input || !list) return;
+
+  var sel = 0;
+  var filtered = ITEMS.slice();
+
+  function open() {
+    palette.hidden = false;
+    input.value = "";
+    sel = 0;
+    filtered = ITEMS.slice();
+    render();
+    setTimeout(function(){ input.focus(); }, 0);
+  }
+  function close() { palette.hidden = true; }
+  function openHelp() { if (help) help.hidden = false; }
+  function closeHelp() { if (help) help.hidden = true; }
+
+  function score(item, q) {
+    if (!q) return 0;
+    var hay = (item.label + " " + (item.hint || "")).toLowerCase();
+    var parts = q.toLowerCase().split(/\\s+/).filter(Boolean);
+    for (var i = 0; i < parts.length; i++) if (hay.indexOf(parts[i]) === -1) return -1;
+    // tiny ranking: prefer matches in label over hint, prefer prefix matches
+    var label = item.label.toLowerCase();
+    var s = 0;
+    for (var j = 0; j < parts.length; j++) {
+      if (label.indexOf(parts[j]) === 0) s += 3;
+      else if (label.indexOf(parts[j]) !== -1) s += 1;
+    }
+    return s;
+  }
+
+  function render() {
+    list.innerHTML = "";
+    var q = input.value.trim();
+    if (!q) {
+      filtered = ITEMS.slice();
+    } else {
+      filtered = ITEMS
+        .map(function(it){ return { it: it, s: score(it, q) }; })
+        .filter(function(x){ return x.s >= 0; })
+        .sort(function(a,b){ return b.s - a.s; })
+        .map(function(x){ return x.it; });
+    }
+    if (sel >= filtered.length) sel = Math.max(0, filtered.length - 1);
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="cmd-empty">No matches.</div>';
+      return;
+    }
+    filtered.slice(0, 60).forEach(function(it, i){
+      var icon = it.kind === "canvas" ? "🗺" : it.kind === "action" ? "⚡" : "📄";
+      var hint = it.hint ? '<span class="cmd-hint">' + escape(it.hint) + '</span>' : "";
+      var row = document.createElement("div");
+      row.className = "cmd-item" + (i === sel ? " selected" : "");
+      row.dataset.idx = i;
+      row.innerHTML = '<span class="cmd-icon">' + icon + '</span>' +
+        '<span class="cmd-label">' + escape(it.label) + '</span>' + hint;
+      row.addEventListener("mouseenter", function(){ sel = i; updateSel(); });
+      row.addEventListener("click", function(){ go(it); });
+      list.appendChild(row);
+    });
+  }
+  function updateSel() {
+    [].forEach.call(list.children, function(c, i){
+      if (c.classList) c.classList.toggle("selected", i === sel);
+    });
+    var cur = list.children[sel];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  function escape(s) {
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
+    });
+  }
+  function go(it) {
+    if (it.action === "toggle-sidebar") {
+      var sb = document.getElementById("wrap-sidebar");
+      if (sb) sb.classList.toggle("collapsed");
+      close();
+      return;
+    }
+    if (it.action === "copy-link") {
+      navigator.clipboard?.writeText(location.href);
+      close();
+      return;
+    }
+    if (it.href) { window.location = it.href; close(); }
+  }
+
+  input.addEventListener("input", function(){ sel = 0; render(); });
+  input.addEventListener("keydown", function(e){
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(filtered.length - 1, sel + 1); updateSel(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); updateSel(); }
+    else if (e.key === "Enter")   { e.preventDefault(); var it = filtered[sel]; if (it) go(it); }
+    else if (e.key === "Escape")  { e.preventDefault(); close(); }
+  });
+  document.getElementById("cmd-backdrop")?.addEventListener("click", close);
+  document.getElementById("cmd-help-backdrop")?.addEventListener("click", closeHelp);
+
+  // Global key bindings — guard against firing while typing in inputs/textareas.
+  var lastG = 0;
+  document.addEventListener("keydown", function(e){
+    var t = e.target;
+    var inField = t && /input|textarea|select/i.test(t.tagName);
+    var isOpen = !palette.hidden;
+    // ⌘K / Ctrl+K / "/" — open palette
+    if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault(); isOpen ? close() : open();
+      return;
+    }
+    if (e.key === "/" && !inField && !isOpen) { e.preventDefault(); open(); return; }
+    if (inField || isOpen) return;
+    if (e.key === "?") { e.preventDefault(); help && help.hidden ? openHelp() : closeHelp(); return; }
+    if (e.key === "Escape") { closeHelp(); return; }
+    if (e.key === "[") {
+      var sb = document.getElementById("wrap-sidebar");
+      if (sb) { e.preventDefault(); sb.classList.toggle("collapsed"); }
+      return;
+    }
+    if (e.key === "g" || e.key === "G") { lastG = Date.now(); return; }
+    if ((e.key === "h" || e.key === "H") && Date.now() - lastG < 800) {
+      e.preventDefault(); window.location = SHARE_BASE;
+    }
+  });
+})();
+</script>`;
+}
+
 export function shareSetFromNotes(notes: NoteRecord[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const n of notes) {
@@ -1309,6 +1605,13 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
       activeUlid: ulid,
       showDownload: false,
     });
+    const palette = renderCommandPalette({
+      shareBase: ctx.shareBase,
+      tokenQuery: ctx.tokenQuery ?? "",
+      notes: ctx.wrapTree.notes,
+      canvases: ctx.wrapTree.canvases,
+      hasSidebar: true,
+    });
     return shell({ title, sidebarLayout: true, body: `
 ${sidebar}
 <main class="wrap-main">
@@ -1321,6 +1624,7 @@ ${sidebar}
   ${tail}
 </main>
 ${SIDEBAR_TOGGLE_JS}
+${palette}
 ` });
   }
 
@@ -1499,6 +1803,14 @@ export async function renderWrapper(
     showDownload: true,
   });
 
+  const palette = renderCommandPalette({
+    shareBase,
+    tokenQuery: tq,
+    notes: records.map(r => ({ ulid: r.ulid, basename: r.basename, path: r.path, title: r.title })),
+    canvases: canvasMetas,
+    hasSidebar: true,
+  });
+
   return shell({
     title: wrap.title ?? "Shared slice",
     wide: true,
@@ -1520,6 +1832,7 @@ ${sidebar}
 </main>
 
 ${SIDEBAR_TOGGLE_JS}
+${palette}
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-quadtree@3/dist/d3-quadtree.min.js"></script>
@@ -1995,6 +2308,13 @@ ${CANVAS_PAN_ZOOM}`;
       activeUlid: ulid,
       showDownload: false,
     });
+    const palette = renderCommandPalette({
+      shareBase: ctx.shareBase,
+      tokenQuery: ctx.tokenQuery ?? "",
+      notes: ctx.wrapTree.notes,
+      canvases: ctx.wrapTree.canvases,
+      hasSidebar: true,
+    });
     return shell({ title, sidebarLayout: true, body: `
 ${sidebar}
 <main class="wrap-main wrap-main-canvas">
@@ -2002,6 +2322,7 @@ ${sidebar}
   ${canvasBody}
 </main>
 ${SIDEBAR_TOGGLE_JS}
+${palette}
 ` });
   }
 
