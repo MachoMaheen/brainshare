@@ -372,6 +372,107 @@ blockquote {
 }
 .note-list a:hover { border-color: var(--text-accent); background: var(--bg-chip); }
 .note-list .folder { font-size: .75em; color: var(--text-faint); display: block; margin-bottom: 2px; }
+/* Wrapper landing layout: persistent left sidebar + flexible main pane */
+.wrap-shell {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+}
+.wrap-sidebar {
+  flex: 0 0 280px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-faint);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  transition: flex-basis .2s ease, transform .2s ease;
+  z-index: 10;
+}
+.wrap-sidebar.collapsed { flex: 0 0 48px; }
+.wrap-sidebar.collapsed .sidebar-inner { display: none; }
+.sidebar-toggle {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 28px; height: 28px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  color: var(--text-muted);
+  z-index: 1;
+}
+.sidebar-toggle:hover { color: var(--text-accent); border-color: var(--text-accent); }
+.sidebar-inner { padding: 1.4em 1.1em; }
+.sidebar-header { margin-bottom: 1em; padding-right: 32px; }
+.sidebar-title { font-size: 1.15em; line-height: 1.25; margin: 0 0 .25em; color: var(--text-normal); }
+.sidebar-badge { margin: .2em 0 .4em; }
+.sidebar-desc { font-size: .82em; color: var(--text-muted); line-height: 1.4; margin: .4em 0 0;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sidebar-cta {
+  display: block; text-align: center;
+  padding: .55em .9em;
+  margin: .6em 0 1.2em;
+  background: var(--text-accent);
+  color: var(--bg-primary) !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px;
+  font-size: .88em; font-weight: 500;
+  text-decoration: none !important;
+}
+.sidebar-cta:hover { opacity: .9; }
+.sidebar-section { margin-bottom: 1.2em; }
+.sidebar-section-title {
+  font-size: .72em;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-faint);
+  margin: 0 0 .4em;
+  padding: 0 .3em;
+}
+.sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
+.sb-link {
+  display: flex; align-items: center; gap: .5em;
+  padding: .35em .55em;
+  font-size: .85em;
+  border-radius: 4px;
+  color: var(--text-normal) !important;
+  text-decoration: none !important;
+  border: 1px solid transparent !important;
+  cursor: pointer;
+}
+.sb-link:hover { background: var(--bg-chip); color: var(--text-accent) !important; border-color: transparent !important; }
+.sb-link-icon { font-size: .95em; opacity: .8; }
+.sb-link-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-link-count {
+  font-size: .75em; color: var(--text-faint);
+  padding: 0 .35em; min-width: 1.5em; text-align: center;
+}
+.sidebar-meta {
+  font-size: .75em;
+  color: var(--text-faint);
+  margin-top: .8em;
+  padding-top: .8em;
+  border-top: 1px solid var(--border-faint);
+}
+.wrap-main {
+  flex: 1; min-width: 0;
+  padding: 2em 2em 4em;
+  max-width: none;
+}
+@media (max-width: 760px) {
+  .wrap-shell { flex-direction: column; }
+  .wrap-sidebar {
+    flex: 0 0 auto; width: 100%;
+    height: auto; max-height: 50vh;
+    position: static; border-right: none;
+    border-bottom: 1px solid var(--border-faint);
+  }
+  .wrap-sidebar.collapsed { max-height: 48px; }
+  .wrap-main { padding: 1em 1em 3em; }
+}
 .wrap-actions {
   display: flex; gap: .5em; flex-wrap: wrap;
   margin: .8em 0 .4em;
@@ -988,36 +1089,72 @@ export async function renderWrapper(
     ? `<span class="gated-pill" title="this share requires a token">🔒 gated</span>`
     : "";
 
+  // Sidebar nav links — folders + canvases. Clicks anchor-jump to the matching section.
+  const sidebarFolderLinks = folderOrder.map((folder) => {
+    const slug = folder ? folder.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "root";
+    const label = folder || "vault root";
+    const count = groups.get(folder)!.length;
+    return `<a class="sb-link" href="#folder-${slug}"><span class="sb-link-icon">📁</span><span class="sb-link-label">${escapeHtml(label)}</span><span class="sb-link-count">${count}</span></a>`;
+  }).join("");
+
+  const sidebarCanvasLinks = canvasMetas.map((c) =>
+    `<a class="sb-link" href="${shareBase}/c/${c.ulid}${tq}"><span class="sb-link-icon">🗺</span><span class="sb-link-label">${escapeHtml(c.basename)}</span></a>`
+  ).join("");
+
+  const assetCount = wrap.assets ? Object.keys(wrap.assets).length : 0;
+
   return shell({
     title: wrap.title ?? "Shared slice",
     wide: true,
+    sidebarLayout: true,
     body: `
-<div class="wrap-header">
-  <h1>${escapeHtml(wrap.title ?? "Shared slice")} ${gatedBadge}</h1>
-  ${wrap.description ? `<p class="desc">${escapeHtml(wrap.description)}</p>` : ""}
-  <div class="wrap-actions">
-    <a class="action-btn" href="${shareBase}/download${tq}" download>
-      <span class="action-icon">⬇</span> Download as Obsidian vault (.zip)
-    </a>
+<aside class="wrap-sidebar" id="wrap-sidebar">
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle navigation">☰</button>
+  <div class="sidebar-inner">
+    <div class="sidebar-header">
+      <h1 class="sidebar-title">${escapeHtml(wrap.title ?? "Shared slice")}</h1>
+      ${gatedBadge ? `<div class="sidebar-badge">${gatedBadge}</div>` : ""}
+      ${wrap.description ? `<p class="sidebar-desc">${escapeHtml(wrap.description)}</p>` : ""}
+    </div>
+
+    <a class="sidebar-cta" href="${shareBase}/download${tq}" download>⬇ Download as .zip</a>
+
+    ${sidebarFolderLinks ? `
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Folders</div>
+      <nav class="sidebar-nav">${sidebarFolderLinks}</nav>
+    </div>` : ""}
+
+    ${sidebarCanvasLinks ? `
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Canvases (${canvasMetas.length})</div>
+      <nav class="sidebar-nav">${sidebarCanvasLinks}</nav>
+    </div>` : ""}
+
+    <div class="sidebar-meta">${records.length} note${records.length === 1 ? "" : "s"}${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset${assetCount === 1 ? "" : "s"}` : ""}</div>
   </div>
-  ${folderChips ? `<div class="folder-chips">${folderChips}</div>` : ""}
-</div>
+</aside>
 
-<div id="graph-host">
-  <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus · double-click empty space to reset</span>
-  <button id="graph-reset" class="graph-reset-btn" type="button" title="Reset view (or double-click empty space)">⌖ Reset view</button>
-  <div id="graph" style="width:100%;height:100%"></div>
-</div>
+<main class="wrap-main">
+  <div id="graph-host">
+    <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus · double-click empty space to reset</span>
+    <button id="graph-reset" class="graph-reset-btn" type="button" title="Reset view (or double-click empty space)">⌖ Reset view</button>
+    <div id="graph" style="width:100%;height:100%"></div>
+  </div>
 
-${canvasMetas.length > 0 ? `
-<h2 style="margin-top:1em">Canvases in this slice</h2>
-<ul class="canvas-list">${canvasMetas.map(c => `<li><a href="${shareBase}/c/${c.ulid}${tq}"><span class="canvas-icon">🗺</span><span class="title">${escapeHtml(c.basename)}</span><span class="ulid">${c.ulid}</span></a></li>`).join("")}</ul>
-` : ""}
+  <h2 style="margin-top:1em">Notes in this slice</h2>
+  ${folderSections.join("")}
 
-<h2 style="margin-top:1em">Notes in this slice</h2>
-${folderSections.join("")}
+  <div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
+</main>
 
-<div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${wrap.assets ? ` · ${Object.keys(wrap.assets).length} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
+<script>
+(function(){
+  var btn = document.getElementById("sidebar-toggle");
+  var sb = document.getElementById("wrap-sidebar");
+  if (btn && sb) btn.addEventListener("click", function(){ sb.classList.toggle("collapsed"); });
+})();
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-quadtree@3/dist/d3-quadtree.min.js"></script>
@@ -1076,29 +1213,42 @@ ${folderSections.join("")}
     var sim = d3.forceSimulation(sized)
       .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(50).strength(0.3))
       .force("charge", d3.forceManyBody().strength(-180).distanceMax(500))
-      .force("center", d3.forceCenter(0, 0).strength(0.05))
+      .force("center", d3.forceCenter(0, 0).strength(0.15))
+      .force("x", d3.forceX(0).strength(0.05))
+      .force("y", d3.forceY(0).strength(0.05))
       .force("collide", d3.forceCollide().radius(function(d){ return d.size + 12; }).strength(0.9))
       .stop();
     var ticks = Math.max(200, Math.min(500, Math.round(120 * Math.log2(sized.length + 2))));
     for (var t = 0; t < ticks; t++) sim.tick();
   }
 
-  // Recenter + normalize to a known target box so the layout always frames cleanly,
-  // regardless of where d3-force ended up. Fits the 95th-percentile bbox so a single
-  // outlier disconnected node can't dominate the framing.
+  // Recenter, scale, and CLAMP outliers so the main cluster always frames in the
+  // viewport regardless of where d3-force settled disconnected components.
   var positions = sized.filter(function(d){ return isFinite(d.x) && isFinite(d.y); });
   if (positions.length > 0) {
-    var sortedX = positions.map(function(d){ return d.x; }).sort(function(a,b){ return a-b; });
-    var sortedY = positions.map(function(d){ return d.y; }).sort(function(a,b){ return a-b; });
-    function pct(arr, p){ return arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * p)))]; }
-    var p05x = pct(sortedX, 0.025), p95x = pct(sortedX, 0.975);
-    var p05y = pct(sortedY, 0.025), p95y = pct(sortedY, 0.975);
-    var cx = (p05x + p95x) / 2, cy = (p05y + p95y) / 2;
-    var span = Math.max(1, Math.max(p95x - p05x, p95y - p05y));
-    var scale = 100 / span;
+    // 1) shift centroid to origin (mean of x,y) — beats percentile midpoint for skewed layouts
+    var meanX = 0, meanY = 0;
+    positions.forEach(function(d){ meanX += d.x; meanY += d.y; });
+    meanX /= positions.length; meanY /= positions.length;
+    sized.forEach(function(d){ d.x -= meanX; d.y -= meanY; });
+
+    // 2) scale so 90th-percentile distance from origin = TARGET (so most nodes fit in [-TARGET, TARGET])
+    var TARGET = 50;
+    var distances = positions.map(function(d){ return Math.sqrt(d.x*d.x + d.y*d.y); }).sort(function(a,b){return a-b;});
+    var p90 = distances[Math.floor(distances.length * 0.9)] || 1;
+    var scale = TARGET / Math.max(1, p90);
+    sized.forEach(function(d){ d.x *= scale; d.y *= scale; });
+
+    // 3) hard-clamp extreme outliers — disconnected components may have flown 5x further
+    //    than the main cluster; without this, sigma's auto-fit shrinks the main cluster
+    //    to a corner of the viewport while wasted whitespace dominates.
+    var MAX_R = TARGET * 1.6;
     sized.forEach(function(d){
-      d.x = (d.x - cx) * scale;
-      d.y = (d.y - cy) * scale;
+      var r = Math.sqrt(d.x*d.x + d.y*d.y);
+      if (r > MAX_R) {
+        d.x = d.x / r * MAX_R;
+        d.y = d.y / r * MAX_R;
+      }
     });
   }
 
@@ -1428,7 +1578,13 @@ export function renderGateError(message: string): string {
 // Page shell
 // ─────────────────────────────────────────────────────────────────────────────
 
-function shell(opts: { title: string; body: string; wide?: boolean }): string {
+function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean }): string {
+  // sidebarLayout puts the body directly into a flex container so the wrapper
+  // landing's <aside> + <main> children lay out side-by-side. Other pages
+  // (notes, canvases, gate errors) keep the centered .container layout.
+  const inner = opts.sidebarLayout
+    ? `<div class="wrap-shell">${opts.body}</div>`
+    : `<main class="container ${opts.wide ? "wide" : ""}">${opts.body}</main>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1438,9 +1594,7 @@ function shell(opts: { title: string; body: string; wide?: boolean }): string {
 <style>${css}</style>
 </head>
 <body>
-<main class="container ${opts.wide ? "wide" : ""}">
-${opts.body}
-</main>
+${inner}
 </body>
 </html>`;
 }
