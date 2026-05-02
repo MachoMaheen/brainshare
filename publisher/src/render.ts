@@ -1020,7 +1020,10 @@ ${folderSections.join("")}
 <div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${wrap.assets ? ` · ${Object.keys(wrap.assets).length} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/build/graphology-layout-forceatlas2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-quadtree@3/dist/d3-quadtree.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-dispatch@3/dist/d3-dispatch.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-timer@3/dist/d3-timer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-force@3/dist/d3-force.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
 <script>
 (function(){
@@ -1045,18 +1048,64 @@ ${folderSections.join("")}
     degree[e.to]   = (degree[e.to]   || 0) + 1;
   });
 
-  // Seed nodes on a circle then let ForceAtlas2 spread them properly.
-  // Random initial offset breaks symmetry — pure circular start makes FA2 oscillate
-  // for graphs with high symmetry.
-  DATA.nodes.forEach(function(n,i){
+  // Build d3-force node/link arrays. d3-force is what Obsidian's graph view uses —
+  // produces clean centered layouts with disconnected components naturally drifting
+  // at the periphery instead of clumping into rings (which is what FA2 was doing here).
+  var sized = DATA.nodes.map(function(n, i){
     var theta = (i / DATA.nodes.length) * 2 * Math.PI;
     var d = degree[n.id] || 0;
-    g.addNode(n.id, {
+    return {
+      id: n.id,
       label: n.label,
-      x: Math.cos(theta) + (Math.random() - 0.5) * 0.1,
-      y: Math.sin(theta) + (Math.random() - 0.5) * 0.1,
+      folder: n.folder,
       size: 5 + Math.min(d, 10) * 1.2,
-      color: nodeColor,
+      x: Math.cos(theta) * 80, // initial seed on a circle, scaled to layout space
+      y: Math.sin(theta) * 80,
+    };
+  });
+  var links = DATA.edges
+    .filter(function(e){ return e.from !== e.to; })
+    .map(function(e){ return { source: e.from, target: e.to }; });
+
+  if (typeof d3 !== "undefined" && d3.forceSimulation) {
+    // Tuned to match Obsidian's defaults reasonably well:
+    //   - charge (repulsion): -180  → enough to push isolated nodes apart
+    //   - link distance: 50         → comfortable spacing between connected pairs
+    //   - center pull: weak (0.05)  → keeps centroid at origin without crushing layout
+    //   - collide: by node size + label gutter so labels rarely overlap
+    var sim = d3.forceSimulation(sized)
+      .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(50).strength(0.3))
+      .force("charge", d3.forceManyBody().strength(-180).distanceMax(500))
+      .force("center", d3.forceCenter(0, 0).strength(0.05))
+      .force("collide", d3.forceCollide().radius(function(d){ return d.size + 12; }).strength(0.9))
+      .stop();
+    var ticks = Math.max(200, Math.min(500, Math.round(120 * Math.log2(sized.length + 2))));
+    for (var t = 0; t < ticks; t++) sim.tick();
+  }
+
+  // Recenter + normalize to a known target box so the layout always frames cleanly,
+  // regardless of where d3-force ended up. Fits the 95th-percentile bbox so a single
+  // outlier disconnected node can't dominate the framing.
+  var positions = sized.filter(function(d){ return isFinite(d.x) && isFinite(d.y); });
+  if (positions.length > 0) {
+    var sortedX = positions.map(function(d){ return d.x; }).sort(function(a,b){ return a-b; });
+    var sortedY = positions.map(function(d){ return d.y; }).sort(function(a,b){ return a-b; });
+    function pct(arr, p){ return arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * p)))]; }
+    var p05x = pct(sortedX, 0.025), p95x = pct(sortedX, 0.975);
+    var p05y = pct(sortedY, 0.025), p95y = pct(sortedY, 0.975);
+    var cx = (p05x + p95x) / 2, cy = (p05y + p95y) / 2;
+    var span = Math.max(1, Math.max(p95x - p05x, p95y - p05y));
+    var scale = 100 / span;
+    sized.forEach(function(d){
+      d.x = (d.x - cx) * scale;
+      d.y = (d.y - cy) * scale;
+    });
+  }
+
+  // Add nodes + edges to graphology now that positions are final
+  sized.forEach(function(d){
+    g.addNode(d.id, {
+      label: d.label, x: d.x, y: d.y, size: d.size, color: nodeColor,
     });
   });
   DATA.edges.forEach(function(e){
@@ -1064,27 +1113,6 @@ ${folderSections.join("")}
       g.addEdge(e.from, e.to, { size: 1, color: edgeColor });
     }
   });
-
-  // ForceAtlas2 — the same family of layouts Gephi/Obsidian use. Scales O(N log N)
-  // via Barnes-Hut, handles 100s–1000s of nodes cleanly. Iterations scale with
-  // graph size; small graphs settle fast, big ones get more passes.
-  var faIters = Math.max(200, Math.min(800, Math.round(50 * Math.log2(DATA.nodes.length + 2))));
-  if (typeof graphologyLibrary !== "undefined" && graphologyLibrary.layoutForceAtlas2) {
-    graphologyLibrary.layoutForceAtlas2.assign(g, {
-      iterations: faIters,
-      settings: {
-        gravity: 1,
-        scalingRatio: 12,         // higher = more spread
-        slowDown: 8,              // damping; higher = smoother settle
-        barnesHutOptimize: DATA.nodes.length > 50,
-        barnesHutTheta: 0.5,
-        strongGravityMode: false,
-        adjustSizes: true,        // respect node size for collision spacing
-        edgeWeightInfluence: 0,
-        linLogMode: false,
-      }
-    });
-  }
 
   var renderer = new Sigma(g, document.getElementById("graph"), {
     labelColor: { color: labelColor },
