@@ -469,6 +469,12 @@ blockquote {
   border: 1px solid transparent !important;
 }
 .tree-file:hover { background: var(--bg-chip); color: var(--text-accent) !important; border-color: transparent !important; }
+.tree-file.active {
+  background: var(--bg-chip);
+  color: var(--text-accent) !important;
+  font-weight: 600;
+}
+.tree-file.active .tree-file-name { color: var(--text-accent); }
 .tree-file-name {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -504,6 +510,20 @@ blockquote {
   padding: 2em 2em 4em;
   max-width: none;
 }
+/* On note pages inside the wrapper shell, constrain the prose to a
+   readable line-length and centre it in the available main pane. The
+   sidebar already eats 280px on the left, so the prose floats nicely. */
+.wrap-main .prose {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.wrap-main-canvas { padding: 1.2em 1.2em 3em; }
+.sidebar-title-link {
+  color: inherit !important;
+  text-decoration: none !important;
+  border-bottom: none !important;
+}
+.sidebar-title-link:hover { color: var(--text-accent) !important; }
 @media (max-width: 760px) {
   .wrap-shell { flex-direction: column; }
   .wrap-sidebar {
@@ -824,6 +844,168 @@ export async function loadNotes(notes: KVNamespace, ulids: string[]): Promise<No
   );
 }
 
+// Lightweight version of loadNotes — only fetches `meta:` keys, never the
+// markdown bodies. Used by note/canvas pages that need to render the sidebar
+// tree but don't care about contents of the OTHER notes in the wrapper.
+export interface NoteLite { ulid: string; basename: string; path: string; title: string }
+export async function loadNotesMeta(notes: KVNamespace, ulids: string[]): Promise<NoteLite[]> {
+  return Promise.all(
+    ulids.map(async (u): Promise<NoteLite> => {
+      const metaRaw = await notes.get(`meta:${u}`);
+      let basename = u, path = u;
+      if (metaRaw) {
+        try {
+          const m = JSON.parse(metaRaw) as NoteMeta;
+          if (m.basename) basename = m.basename;
+          if (m.path) path = m.path;
+        } catch { /* fall through */ }
+      }
+      return { ulid: u, basename, path, title: basename };
+    })
+  );
+}
+
+export interface CanvasLite { ulid: string; path: string; basename: string }
+export async function loadCanvasMeta(notes: KVNamespace, ulids: string[]): Promise<CanvasLite[]> {
+  return Promise.all(ulids.map(async (u): Promise<CanvasLite> => {
+    const raw = await notes.get(`canvasmeta:${u}`);
+    let path = u, basename = u;
+    if (raw) {
+      try {
+        const m = JSON.parse(raw) as NoteMeta;
+        path = m.path; basename = m.basename;
+      } catch { /* keep defaults */ }
+    }
+    return { ulid: u, path, basename };
+  }));
+}
+
+// Build the Obsidian-style nested file tree shared by the wrapper landing AND
+// the note/canvas pages. activeUlid (note OR canvas) gets the .active class
+// and its ancestor folders are emitted with `open` so the user lands on the
+// right spot in the tree.
+export function renderTreeSidebar(opts: {
+  title: string;
+  description?: string;
+  gated?: boolean;
+  shareBase: string;
+  tokenQuery: string;
+  notes: { ulid: string; path: string; title: string; basename: string; md?: string | null }[];
+  canvases: CanvasLite[];
+  assetCount: number;
+  activeUlid?: string;
+  showDownload?: boolean;
+}): string {
+  const tq = opts.tokenQuery;
+  type TreeFile = { kind: "note" | "canvas"; ulid: string; label: string; isActive: boolean };
+  type TreeFolder = { name: string; folders: Map<string, TreeFolder>; files: TreeFile[]; hasActive: boolean };
+  const root: TreeFolder = { name: "", folders: new Map(), files: [], hasActive: false };
+  function ensureFolder(parts: string[]): TreeFolder[] {
+    const chain: TreeFolder[] = [];
+    let cur = root;
+    for (const seg of parts) {
+      let next = cur.folders.get(seg);
+      if (!next) {
+        next = { name: seg, folders: new Map(), files: [], hasActive: false };
+        cur.folders.set(seg, next);
+      }
+      chain.push(next);
+      cur = next;
+    }
+    return chain;
+  }
+  for (const n of opts.notes) {
+    if (n.md === null) continue;
+    const parts = n.path.split("/");
+    const fileName = parts.pop()!.replace(/\.md$/i, "");
+    const chain = ensureFolder(parts);
+    const isActive = opts.activeUlid === n.ulid;
+    (chain.length ? chain[chain.length - 1] : root).files.push({
+      kind: "note", ulid: n.ulid, label: n.title || fileName, isActive,
+    });
+    if (isActive) for (const f of chain) f.hasActive = true;
+  }
+  for (const c of opts.canvases) {
+    const parts = c.path.split("/");
+    const fileName = parts.pop()!.replace(/\.canvas$/i, "");
+    const chain = ensureFolder(parts);
+    const isActive = opts.activeUlid === c.ulid;
+    (chain.length ? chain[chain.length - 1] : root).files.push({
+      kind: "canvas", ulid: c.ulid, label: fileName || c.basename, isActive,
+    });
+    if (isActive) for (const f of chain) f.hasActive = true;
+  }
+  function countDescendants(node: TreeFolder): number {
+    let n = node.files.length;
+    for (const sub of node.folders.values()) n += countDescendants(sub);
+    return n;
+  }
+  function renderTreeFolder(node: TreeFolder, isRoot: boolean): string {
+    const subs = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const files = [...node.files].sort((a, b) => a.label.localeCompare(b.label));
+    const childHtml = subs.map((s) => renderTreeFolder(s, false)).join("") +
+      files.map((f) => {
+        const href = f.kind === "canvas"
+          ? `${opts.shareBase}/c/${f.ulid}${tq}`
+          : `${opts.shareBase}/${f.ulid}${tq}`;
+        const tag = f.kind === "canvas"
+          ? `<span class="tree-file-tag">canvas</span>` : "";
+        const cls = f.isActive ? "tree-file active" : "tree-file";
+        return `<a class="${cls}" href="${href}"><span class="tree-file-name">${escapeHtml(f.label)}</span>${tag}</a>`;
+      }).join("");
+    if (isRoot) return childHtml;
+    const total = countDescendants(node);
+    // open if it contains the active file OR if there's no active file at all
+    // (so the wrapper landing shows everything expanded by default).
+    const open = node.hasActive || !opts.activeUlid ? " open" : "";
+    return `<details class="tree-folder"${open}><summary><span class="tree-chevron">▶</span><span class="tree-folder-name">${escapeHtml(node.name)}</span><span class="tree-folder-count">${total}</span></summary><div class="tree-children">${childHtml}</div></details>`;
+  }
+  const treeHtml = renderTreeFolder(root, true);
+  const noteCount = opts.notes.filter(n => n.md !== null).length;
+  const meta = `${noteCount} note${noteCount === 1 ? "" : "s"}` +
+    (opts.canvases.length ? ` · ${opts.canvases.length} canvas${opts.canvases.length === 1 ? "" : "es"}` : "") +
+    (opts.assetCount ? ` · ${opts.assetCount} asset${opts.assetCount === 1 ? "" : "s"}` : "");
+  const gatedBadge = opts.gated ? `<div class="sidebar-badge"><span class="gated-pill" title="this share requires a token">🔒 gated</span></div>` : "";
+  const desc = opts.description ? `<p class="sidebar-desc">${escapeHtml(opts.description)}</p>` : "";
+  const downloadLink = opts.showDownload
+    ? `<a class="sidebar-cta" href="${opts.shareBase}/download${tq}" download>⬇ Download as .zip</a>`
+    : `<a class="sidebar-cta" href="${opts.shareBase}${tq}">← back to overview</a>`;
+  return `<aside class="wrap-sidebar" id="wrap-sidebar">
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle navigation">☰</button>
+  <div class="sidebar-inner">
+    <div class="sidebar-header">
+      <h1 class="sidebar-title"><a href="${opts.shareBase}${tq}" class="sidebar-title-link">${escapeHtml(opts.title)}</a></h1>
+      ${gatedBadge}
+      ${desc}
+    </div>
+    ${downloadLink}
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Files</div>
+      <div class="tree">${treeHtml}</div>
+    </div>
+    <div class="sidebar-meta">${meta}</div>
+  </div>
+</aside>`;
+}
+
+const SIDEBAR_TOGGLE_JS = `<script>
+(function(){
+  var btn = document.getElementById("sidebar-toggle");
+  var sb = document.getElementById("wrap-sidebar");
+  if (btn && sb) btn.addEventListener("click", function(){ sb.classList.toggle("collapsed"); });
+  // On narrow viewports, collapse the sidebar after a tree-link click so the
+  // user can read the note. Mirrors Obsidian mobile's behaviour.
+  if (sb && matchMedia("(max-width: 760px)").matches) {
+    sb.querySelectorAll(".tree-file").forEach(function(a){
+      a.addEventListener("click", function(){ sb.classList.add("collapsed"); });
+    });
+  }
+  // Scroll the active item into view inside the sidebar
+  var active = sb && sb.querySelector(".tree-file.active");
+  if (active) active.scrollIntoView({ block: "center" });
+})();
+</script>`;
+
 export function shareSetFromNotes(notes: NoteRecord[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const n of notes) {
@@ -872,6 +1054,16 @@ export interface RenderCtx {
   path?: string;                  // vault-relative path (for breadcrumb)
   tokenQuery?: string;            // "?t=<jwt>" appended to internal links when gated
   gated?: boolean;
+  // Optional wrapper-tree data: when present, note/canvas pages render the
+  // same Obsidian-style sidebar as the wrapper landing, so navigation between
+  // notes never loses the file explorer.
+  wrapTree?: {
+    wrapTitle: string;
+    wrapDesc?: string;
+    notes: NoteLite[];
+    canvases: CanvasLite[];
+    assetCount: number;
+  };
 }
 
 export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
@@ -965,6 +1157,34 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
   // something to render. marked emits ```mermaid as <pre><code class="language-mermaid">.
   const hasMermaid = /<code class="language-mermaid">/.test(html);
   const tail = hasMermaid ? MERMAID_BOOTSTRAP : "";
+
+  if (ctx?.wrapTree && ctx?.shareBase) {
+    const sidebar = renderTreeSidebar({
+      title: ctx.wrapTree.wrapTitle,
+      description: ctx.wrapTree.wrapDesc,
+      gated: ctx.gated,
+      shareBase: ctx.shareBase,
+      tokenQuery: ctx.tokenQuery ?? "",
+      notes: ctx.wrapTree.notes.map(n => ({ ...n, md: "" })),
+      canvases: ctx.wrapTree.canvases,
+      assetCount: ctx.wrapTree.assetCount,
+      activeUlid: ulid,
+      showDownload: false,
+    });
+    return shell({ title, sidebarLayout: true, body: `
+${sidebar}
+<main class="wrap-main">
+  <article class="prose">
+    ${breadcrumb}
+    ${props}
+    <h1>${escapeHtml(title)}</h1>
+    ${html}
+  </article>
+  ${tail}
+</main>
+${SIDEBAR_TOGGLE_JS}
+` });
+  }
 
   return shell({ title, body: `
 ${breadcrumb}
@@ -1127,90 +1347,26 @@ export async function renderWrapper(
     edges,
   };
 
-  const gatedBadge = wrap.gated
-    ? `<span class="gated-pill" title="this share requires a token">🔒 gated</span>`
-    : "";
-
-  // Build an Obsidian-style nested file tree from notes + canvases. Both share
-  // the `path` field so we can mix them into the same tree, then render with
-  // <details>/<summary> for free expand/collapse. No JS needed.
-  type TreeFile = { kind: "note" | "canvas"; ulid: string; label: string };
-  type TreeFolder = { name: string; folders: Map<string, TreeFolder>; files: TreeFile[] };
-  const root: TreeFolder = { name: "", folders: new Map(), files: [] };
-  function ensureFolder(parts: string[]): TreeFolder {
-    let cur = root;
-    for (const seg of parts) {
-      let next = cur.folders.get(seg);
-      if (!next) {
-        next = { name: seg, folders: new Map(), files: [] };
-        cur.folders.set(seg, next);
-      }
-      cur = next;
-    }
-    return cur;
-  }
-  for (const r of records) {
-    if (!r.md) continue;
-    const parts = r.path.split("/");
-    const fileName = parts.pop()!.replace(/\.md$/i, "");
-    const folder = ensureFolder(parts);
-    folder.files.push({ kind: "note", ulid: r.ulid, label: r.title || fileName });
-  }
-  for (const c of canvasMetas) {
-    const parts = c.path.split("/");
-    const fileName = parts.pop()!.replace(/\.canvas$/i, "");
-    const folder = ensureFolder(parts);
-    folder.files.push({ kind: "canvas", ulid: c.ulid, label: fileName || c.basename });
-  }
-  function countDescendants(node: TreeFolder): number {
-    let n = node.files.length;
-    for (const sub of node.folders.values()) n += countDescendants(sub);
-    return n;
-  }
-  function renderTreeFolder(node: TreeFolder, isRoot: boolean): string {
-    const subs = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const files = [...node.files].sort((a, b) => a.label.localeCompare(b.label));
-    const childHtml = subs.map((s) => renderTreeFolder(s, false)).join("") +
-      files.map((f) => {
-        const href = f.kind === "canvas"
-          ? `${shareBase}/c/${f.ulid}${tq}`
-          : `${shareBase}/${f.ulid}${tq}`;
-        const tag = f.kind === "canvas"
-          ? `<span class="tree-file-tag">canvas</span>` : "";
-        return `<a class="tree-file" href="${href}"><span class="tree-file-name">${escapeHtml(f.label)}</span>${tag}</a>`;
-      }).join("");
-    if (isRoot) return childHtml;
-    const total = countDescendants(node);
-    return `<details class="tree-folder" open><summary><span class="tree-chevron">▶</span><span class="tree-folder-name">${escapeHtml(node.name)}</span><span class="tree-folder-count">${total}</span></summary><div class="tree-children">${childHtml}</div></details>`;
-  }
-  const sidebarTreeHtml = renderTreeFolder(root, true);
-
   const assetCount = wrap.assets ? Object.keys(wrap.assets).length : 0;
+
+  const sidebar = renderTreeSidebar({
+    title: wrap.title ?? "Shared slice",
+    description: wrap.description,
+    gated: wrap.gated,
+    shareBase,
+    tokenQuery: tq,
+    notes: records,
+    canvases: canvasMetas,
+    assetCount,
+    showDownload: true,
+  });
 
   return shell({
     title: wrap.title ?? "Shared slice",
     wide: true,
     sidebarLayout: true,
     body: `
-<aside class="wrap-sidebar" id="wrap-sidebar">
-  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle navigation">☰</button>
-  <div class="sidebar-inner">
-    <div class="sidebar-header">
-      <h1 class="sidebar-title">${escapeHtml(wrap.title ?? "Shared slice")}</h1>
-      ${gatedBadge ? `<div class="sidebar-badge">${gatedBadge}</div>` : ""}
-      ${wrap.description ? `<p class="sidebar-desc">${escapeHtml(wrap.description)}</p>` : ""}
-    </div>
-
-    <a class="sidebar-cta" href="${shareBase}/download${tq}" download>⬇ Download as .zip</a>
-
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Files</div>
-      <div class="tree">${sidebarTreeHtml}</div>
-    </div>
-
-    <div class="sidebar-meta">${records.length} note${records.length === 1 ? "" : "s"}${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset${assetCount === 1 ? "" : "s"}` : ""}</div>
-  </div>
-</aside>
+${sidebar}
 
 <main class="wrap-main">
   <div id="graph-host">
@@ -1225,13 +1381,7 @@ export async function renderWrapper(
   <div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 </main>
 
-<script>
-(function(){
-  var btn = document.getElementById("sidebar-toggle");
-  var sb = document.getElementById("wrap-sidebar");
-  if (btn && sb) btn.addEventListener("click", function(){ sb.classList.toggle("collapsed"); });
-})();
-</script>
+${SIDEBAR_TOGGLE_JS}
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-quadtree@3/dist/d3-quadtree.min.js"></script>
@@ -1252,7 +1402,11 @@ export async function renderWrapper(
   var nodeColor  = (styles.getPropertyValue("--text-muted").trim()  || "#8a8a8a");
   var edgeColor  = (styles.getPropertyValue("--border").trim()      || "#363636");
   var labelColor = (styles.getPropertyValue("--text-normal").trim() || "#dcddde");
-  var dimColor   = "rgba(140,140,140,0.18)";
+  // Dim must be a flat colour (sigma's WebGL renderer ignores rgba alpha for
+  // node fills). Pick something close to the background so non-neighbours
+  // genuinely fade instead of staying half-visible.
+  var bgIsDark   = matchMedia("(prefers-color-scheme: dark)").matches;
+  var dimColor   = bgIsDark ? "#2a2a2a" : "#dee2e6";
 
   // Degree → node size (Obsidian's "more links → bigger node")
   var degree = {};
@@ -1348,8 +1502,8 @@ export async function renderWrapper(
 
   var renderer = new Sigma(g, document.getElementById("graph"), {
     labelColor: { color: labelColor },
-    labelSize: 11,
-    labelWeight: "400",
+    labelSize: 12,
+    labelWeight: "500",
     // Match Obsidian: only show labels for nodes that are big enough AND don't
     // collide with each other in the label grid. At default zoom only hubs show
     // labels; zoom in to reveal more.
@@ -1360,6 +1514,8 @@ export async function renderWrapper(
     defaultEdgeColor: edgeColor,
     minCameraRatio: 0.05,
     maxCameraRatio: 8,
+    // zIndex lets us render the focused node + its edges on TOP of the dim ones
+    zIndex: true,
   });
 
   // Reset/fit handler — bring the camera back to the default state that frames
@@ -1381,31 +1537,64 @@ export async function renderWrapper(
     resetView();
   });
 
-  // Hover-dim implemented via direct attribute mutation — simpler and more reliable
-  // than reducers in sigma 2.4. Cache originals so we can restore on leave.
-  var origNodeColor = {}, origNodeSize = {}, origEdgeColor = {};
-  g.forEachNode(function(n, a){ origNodeColor[n] = a.color; origNodeSize[n] = a.size; });
-  g.forEachEdge(function(e, a){ origEdgeColor[e] = a.color; });
+  // Hover-focus implemented via sigma reducers — the only way to selectively
+  // FORCE labels on (for hovered + neighbours) and OFF (for the rest) without
+  // mutating graph data. The previous direct-mutation version made every other
+  // label still render at default opacity, producing the unreadable overlap the
+  // user reported. Now: hovered node grows + turns accent, its neighbours stay
+  // visible with labels, and everyone else fades to a non-distracting dim.
+  var hoveredNode = null;
+  var hoveredNeighbors = null;
+
+  renderer.setSetting("nodeReducer", function(node, data){
+    var res = Object.assign({}, data);
+    if (hoveredNode) {
+      if (node === hoveredNode) {
+        res.color = accent;
+        res.size = data.size * 2;
+        res.forceLabel = true;
+        res.zIndex = 2;
+      } else if (hoveredNeighbors[node]) {
+        res.color = accent;       // neighbour nodes also adopt accent so the focused cluster reads as one shape
+        res.forceLabel = true;
+        res.zIndex = 1;
+      } else {
+        res.color = dimColor;
+        res.label = "";    // hide label entirely so it can't overlap the focused cluster
+        res.zIndex = 0;
+      }
+    }
+    return res;
+  });
+
+  renderer.setSetting("edgeReducer", function(edge, data){
+    var res = Object.assign({}, data);
+    if (hoveredNode) {
+      var src = g.source(edge), tgt = g.target(edge);
+      if (src === hoveredNode || tgt === hoveredNode) {
+        res.color = accent;
+        res.size = (data.size || 1) * 2.5;
+        res.zIndex = 1;
+      } else {
+        res.color = dimColor;
+        res.zIndex = 0;
+      }
+    }
+    return res;
+  });
 
   renderer.on("enterNode", function(p){
-    var hovered = p.node;
-    var neighbors = {}; neighbors[hovered] = true;
-    g.forEachNeighbor(hovered, function(nb){ neighbors[nb] = true; });
-    g.forEachNode(function(n){
-      if (neighbors[n]) {
-        g.setNodeAttribute(n, "color", n === hovered ? accent : origNodeColor[n]);
-      } else {
-        g.setNodeAttribute(n, "color", dimColor);
-      }
-    });
-    g.forEachEdge(function(e, _a, src, tgt){
-      g.setEdgeAttribute(e, "color", (neighbors[src] && neighbors[tgt]) ? accent : dimColor);
-    });
+    hoveredNode = p.node;
+    hoveredNeighbors = {};
+    hoveredNeighbors[p.node] = true;
+    g.forEachNeighbor(p.node, function(nb){ hoveredNeighbors[nb] = true; });
+    renderer.refresh();
     document.body.style.cursor = "pointer";
   });
   renderer.on("leaveNode", function(){
-    g.forEachNode(function(n){ g.setNodeAttribute(n, "color", origNodeColor[n]); });
-    g.forEachEdge(function(e){ g.setEdgeAttribute(e, "color", origEdgeColor[e]); });
+    hoveredNode = null;
+    hoveredNeighbors = null;
+    renderer.refresh();
     document.body.style.cursor = "";
   });
   renderer.on("clickNode", function(p){ window.location = "/share/" + DATA.wrapId + "/" + p.node + DATA.tokenQuery; });
@@ -1572,13 +1761,7 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
   }).join("\n") ?? "";
 
   const breadcrumb = renderBreadcrumb(ctx, title);
-
-  return shell({
-    title,
-    wide: true,
-    body: `
-${breadcrumb}
-<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
+  const canvasBody = `<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
 <p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s) · scroll/pinch to zoom · drag to pan</p>
 <div class="canvas-host" id="canvas-host">
   <svg id="canvas-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
@@ -1593,7 +1776,37 @@ ${breadcrumb}
   </svg>
   <button id="canvas-reset" class="graph-reset-btn" type="button" title="Reset view">⌖ Reset view</button>
 </div>
-${CANVAS_PAN_ZOOM}
+${CANVAS_PAN_ZOOM}`;
+
+  if (ctx?.wrapTree && ctx?.shareBase) {
+    const sidebar = renderTreeSidebar({
+      title: ctx.wrapTree.wrapTitle,
+      description: ctx.wrapTree.wrapDesc,
+      gated: ctx.gated,
+      shareBase: ctx.shareBase,
+      tokenQuery: ctx.tokenQuery ?? "",
+      notes: ctx.wrapTree.notes.map(n => ({ ...n, md: "" })),
+      canvases: ctx.wrapTree.canvases,
+      assetCount: ctx.wrapTree.assetCount,
+      activeUlid: ulid,
+      showDownload: false,
+    });
+    return shell({ title, sidebarLayout: true, body: `
+${sidebar}
+<main class="wrap-main wrap-main-canvas">
+  ${breadcrumb}
+  ${canvasBody}
+</main>
+${SIDEBAR_TOGGLE_JS}
+` });
+  }
+
+  return shell({
+    title,
+    wide: true,
+    body: `
+${breadcrumb}
+${canvasBody}
 `,
   });
 }

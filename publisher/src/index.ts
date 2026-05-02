@@ -5,6 +5,8 @@ import {
   renderCanvas,
   buildShareSet,
   loadNotes,
+  loadNotesMeta,
+  loadCanvasMeta,
   NoteMeta,
   WrapData,
 } from "./render";
@@ -407,17 +409,26 @@ export default {
       const gate = await checkGate(env, wrap, wrapId, url);
       if (!gate.ok) return gate.resp;
 
-      const [canvasJson, canvasPath, shareSet, canvasSet] = await Promise.all([
+      const [canvasJson, canvasPath, shareSet, canvasSet, treeNotes, treeCanvases] = await Promise.all([
         env.NOTES.get(`canvas:${ulid}`),
         env.NOTES.get(`canvasmeta:${ulid}`).then(r => r ? (JSON.parse(r) as NoteMeta).path : undefined),
         buildShareSet(env.NOTES, wrap.ulids),
         buildCanvasSet(env.NOTES, wrap.canvases),
+        loadNotesMeta(env.NOTES, wrap.ulids),
+        loadCanvasMeta(env.NOTES, wrap.canvases),
       ]);
       if (!canvasJson) return html("<h1>404</h1><p>canvas not yet published</p>", 404);
       const shareBase = `${origin}/share/${wrapId}`;
       return html(renderCanvas(canvasJson, ulid, {
         shareBase, shareSet, canvasSet,
         path: canvasPath, tokenQuery: gate.tokenQuery, gated: wrap.gated,
+        wrapTree: {
+          wrapTitle: wrap.title ?? "Shared slice",
+          wrapDesc: wrap.description,
+          notes: treeNotes,
+          canvases: treeCanvases,
+          assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
+        },
       }));
     }
 
@@ -436,11 +447,13 @@ export default {
       const gate = await checkGate(env, wrap, wrapId, url);
       if (!gate.ok) return gate.resp;
 
-      const [md, notePath, shareSet, canvasSet] = await Promise.all([
+      const [md, notePath, shareSet, canvasSet, treeNotes, treeCanvases] = await Promise.all([
         env.NOTES.get(`note:${ulid}`),
         getNotePath(env.NOTES, ulid),
         buildShareSet(env.NOTES, wrap.ulids),
         buildCanvasSet(env.NOTES, wrap.canvases ?? []),
+        loadNotesMeta(env.NOTES, wrap.ulids),
+        loadCanvasMeta(env.NOTES, wrap.canvases ?? []),
       ]);
       if (!md) return html("<h1>404</h1><p>note not yet published</p>", 404);
       const shareBase = `${origin}/share/${wrapId}`;
@@ -452,6 +465,13 @@ export default {
         path: notePath,
         tokenQuery: gate.tokenQuery,
         gated: wrap.gated,
+        wrapTree: {
+          wrapTitle: wrap.title ?? "Shared slice",
+          wrapDesc: wrap.description,
+          notes: treeNotes,
+          canvases: treeCanvases,
+          assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
+        },
       }));
     }
 
