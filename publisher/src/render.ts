@@ -1500,10 +1500,49 @@ ${SIDEBAR_TOGGLE_JS}
     }
   });
 
+  // Background colour for the label pill — uses the page bg so labels look
+  // like they're cut out of the canvas rather than floating over a noisy
+  // background. Reads at any zoom + with neighbour clusters that overlap.
+  var labelBg = (styles.getPropertyValue("--bg-primary").trim() || (bgIsDark ? "#1e1e1e" : "#ffffff"));
+  // Custom label renderer with a filled background pill behind every label.
+  // This is the missing ingredient — sigma's default renderer just draws
+  // text, so neighbour labels and dim-node ghosts fight each other for
+  // legibility on hover. The pill gives each label its own readable surface.
+  function drawLabelWithBg(context, data, settings) {
+    if (!data.label) return;
+    var size = settings.labelSize;
+    var font = settings.labelFont;
+    var weight = settings.labelWeight;
+    context.font = (weight || "400") + " " + size + "px " + font;
+    var metrics = context.measureText(data.label);
+    var PADX = 5, PADY = 3, RADIUS = 4;
+    var textX = data.x + data.size + 4;
+    var textY = data.y + size / 3;
+    // Pill background
+    context.fillStyle = labelBg;
+    context.beginPath();
+    var rx = textX - PADX;
+    var ry = data.y - size / 2 - PADY + 1;
+    var rw = metrics.width + PADX * 2;
+    var rh = size + PADY * 2;
+    if (typeof context.roundRect === "function") {
+      context.roundRect(rx, ry, rw, rh, RADIUS);
+    } else {
+      context.rect(rx, ry, rw, rh);
+    }
+    context.fill();
+    // Text
+    var col = settings.labelColor && settings.labelColor.color;
+    context.fillStyle = col || labelColor;
+    context.fillText(data.label, textX, textY);
+  }
+
   var renderer = new Sigma(g, document.getElementById("graph"), {
     labelColor: { color: labelColor },
     labelSize: 12,
     labelWeight: "500",
+    labelRenderer: drawLabelWithBg,
+    hoverRenderer: drawLabelWithBg,
     // Match Obsidian: only show labels for nodes that are big enough AND don't
     // collide with each other in the label grid. At default zoom only hubs show
     // labels; zoom in to reveal more.
