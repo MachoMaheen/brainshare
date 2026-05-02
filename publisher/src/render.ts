@@ -204,8 +204,86 @@ blockquote {
   border-radius: 8px;
   background: var(--bg-secondary);
   overflow: hidden;
-  height: 70vh; min-height: 500px;
+  height: 78vh; min-height: 560px;
   margin: 0 0 2em;
+}
+.canvas-host:fullscreen { height: 100vh; border-radius: 0; border: 0; margin: 0; }
+.canvas-host:fullscreen #canvas-svg { background-size: 30px 30px; }
+/* Obsidian-style floating control rail along the right edge */
+.canvas-rail {
+  position: absolute;
+  top: 12px; right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  z-index: 5;
+}
+.canvas-rail button {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  font-family: inherit;
+}
+.canvas-rail button:hover {
+  background: var(--bg-chip);
+  color: var(--text-accent);
+}
+.canvas-rail button:active { transform: scale(0.95); }
+.canvas-rail .rail-divider {
+  height: 1px;
+  background: var(--border-faint);
+  margin: 2px 4px;
+}
+.canvas-rail .rail-help {
+  position: relative;
+}
+.canvas-rail-tip {
+  position: absolute;
+  top: 0; right: 100%;
+  margin-right: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  display: none;
+}
+.canvas-rail-tip.visible { display: block; }
+.canvas-rail-tip kbd {
+  background: var(--kbd-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-normal);
+}
+.canvas-backlinks {
+  position: absolute;
+  bottom: 10px; right: 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--bg-primary);
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--border-faint);
+  z-index: 4;
 }
 #canvas-svg {
   width: 100%; height: 100%;
@@ -1801,7 +1879,7 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
 
   const breadcrumb = renderBreadcrumb(ctx, title);
   const canvasBody = `<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
-<p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s) · scroll/pinch to zoom · drag to pan</p>
+<p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s)</p>
 <div class="canvas-host" id="canvas-host">
   <svg id="canvas-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -1813,7 +1891,28 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
     <g id="canvas-groups">${groupSvg}</g>
     <g id="canvas-nodes">${otherSvg}</g>
   </svg>
-  <button id="canvas-reset" class="graph-reset-btn" type="button" title="Reset view">⌖ Reset view</button>
+  <div class="canvas-rail" id="canvas-rail">
+    <button id="canvas-zoom-in"  type="button" title="Zoom in (=)">+</button>
+    <button id="canvas-zoom-out" type="button" title="Zoom out (-)">−</button>
+    <div class="rail-divider"></div>
+    <button id="canvas-fit"      type="button" title="Fit to screen (F)">⛶</button>
+    <button id="canvas-reset"    type="button" title="Reset view (R or double-click)">⌖</button>
+    <div class="rail-divider"></div>
+    <button id="canvas-fullscreen" type="button" title="Toggle fullscreen (Shift+F)">⛶</button>
+    <div class="rail-divider"></div>
+    <div class="rail-help">
+      <button id="canvas-help" type="button" title="Keyboard shortcuts">?</button>
+      <div class="canvas-rail-tip" id="canvas-tip">
+        <div><kbd>scroll</kbd> · zoom at cursor</div>
+        <div><kbd>drag</kbd> · pan</div>
+        <div><kbd>=</kbd> / <kbd>-</kbd> · zoom in / out</div>
+        <div><kbd>F</kbd> · fit to screen</div>
+        <div><kbd>R</kbd> · reset view</div>
+        <div><kbd>⇧F</kbd> · fullscreen</div>
+        <div><kbd>dbl-click</kbd> · reset</div>
+      </div>
+    </div>
+  </div>
 </div>
 ${CANVAS_PAN_ZOOM}`;
 
@@ -1904,8 +2003,52 @@ const CANVAS_PAN_ZOOM = `<script>
   });
   window.addEventListener("mouseup", () => { dragging = false; svg.style.cursor = ""; });
 
+  // Programmatic zoom anchored at the centre of the SVG (used by toolbar buttons + keys)
+  function zoomAt(factor) {
+    const cx = vx + vw / 2;
+    const cy = vy + vh / 2;
+    vw *= factor; vh *= factor;
+    vx = cx - vw / 2; vy = cy - vh / 2;
+    apply();
+  }
+  function fitToScreen() { reset(); }
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else host.requestFullscreen?.();
+  }
+
   document.getElementById("canvas-reset")?.addEventListener("click", reset);
+  document.getElementById("canvas-fit")?.addEventListener("click", fitToScreen);
+  document.getElementById("canvas-zoom-in")?.addEventListener("click", () => zoomAt(1 / 1.2));
+  document.getElementById("canvas-zoom-out")?.addEventListener("click", () => zoomAt(1.2));
+  document.getElementById("canvas-fullscreen")?.addEventListener("click", toggleFullscreen);
+  const tip = document.getElementById("canvas-tip");
+  document.getElementById("canvas-help")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    tip?.classList.toggle("visible");
+  });
+  document.addEventListener("click", () => tip?.classList.remove("visible"));
+
   svg.addEventListener("dblclick", reset);
+
+  // Keyboard shortcuts — only fire when canvas-host is hovered or focused, so
+  // they don't intercept typing elsewhere on the page.
+  let hostHover = false;
+  host.addEventListener("mouseenter", () => { hostHover = true; });
+  host.addEventListener("mouseleave", () => { hostHover = false; });
+  document.addEventListener("keydown", (e) => {
+    if (!hostHover) return;
+    if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+    switch (e.key) {
+      case "=": case "+": e.preventDefault(); zoomAt(1 / 1.2); break;
+      case "-": case "_": e.preventDefault(); zoomAt(1.2); break;
+      case "f": case "F":
+        if (e.shiftKey) { e.preventDefault(); toggleFullscreen(); }
+        else { e.preventDefault(); fitToScreen(); }
+        break;
+      case "r": case "R": e.preventDefault(); reset(); break;
+    }
+  });
 })();
 </script>`;
 
