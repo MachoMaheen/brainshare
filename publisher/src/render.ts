@@ -412,49 +412,91 @@ blockquote {
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
 .sidebar-cta {
-  display: block; text-align: center;
-  padding: .55em .9em;
-  margin: .6em 0 1.2em;
-  background: var(--text-accent);
-  color: var(--bg-primary) !important;
-  border: 1px solid transparent !important;
-  border-radius: 6px;
-  font-size: .88em; font-weight: 500;
+  display: inline-flex; align-items: center; gap: .35em;
+  font-size: .8em; color: var(--text-accent) !important;
   text-decoration: none !important;
+  padding: .25em 0; margin: .2em 0 1em;
 }
-.sidebar-cta:hover { opacity: .9; }
-.sidebar-section { margin-bottom: 1.2em; }
+.sidebar-cta:hover { text-decoration: underline !important; }
+.sidebar-section { margin-bottom: 1em; }
 .sidebar-section-title {
-  font-size: .72em;
+  font-size: .68em;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .06em;
   color: var(--text-faint);
-  margin: 0 0 .4em;
-  padding: 0 .3em;
+  font-weight: 600;
+  margin: 0 0 .35em;
+  padding: 0 .2em;
 }
-.sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
-.sb-link {
-  display: flex; align-items: center; gap: .5em;
-  padding: .35em .55em;
-  font-size: .85em;
+/* Obsidian-style file tree */
+.tree { display: flex; flex-direction: column; gap: 0; font-size: .85em; }
+.tree-folder { display: block; }
+.tree-folder > summary {
+  display: flex; align-items: center; gap: .35em;
+  padding: .25em .35em;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--text-normal);
+  list-style: none;
+  user-select: none;
+}
+.tree-folder > summary::-webkit-details-marker { display: none; }
+.tree-folder > summary::marker { display: none; }
+.tree-folder > summary:hover { background: var(--bg-chip); color: var(--text-accent); }
+.tree-chevron {
+  display: inline-block; width: 12px; flex: 0 0 12px;
+  font-size: .7em; color: var(--text-faint);
+  transition: transform .15s ease;
+  transform: rotate(90deg);
+}
+.tree-folder:not([open]) > summary .tree-chevron { transform: rotate(0deg); }
+.tree-folder-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+.tree-folder-count {
+  font-size: .75em; color: var(--text-faint);
+  padding: 0 .35em;
+}
+.tree-children { display: flex; flex-direction: column; gap: 0; }
+.tree-file {
+  display: flex; align-items: center; gap: .4em;
+  padding: .22em .35em .22em 1.55em;
   border-radius: 4px;
   color: var(--text-normal) !important;
   text-decoration: none !important;
   border: 1px solid transparent !important;
-  cursor: pointer;
 }
-.sb-link:hover { background: var(--bg-chip); color: var(--text-accent) !important; border-color: transparent !important; }
-.sb-link-icon { font-size: .95em; opacity: .8; }
-.sb-link-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-link-count {
-  font-size: .75em; color: var(--text-faint);
-  padding: 0 .35em; min-width: 1.5em; text-align: center;
+.tree-file:hover { background: var(--bg-chip); color: var(--text-accent) !important; border-color: transparent !important; }
+.tree-file-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .92em;
 }
-.sidebar-meta {
-  font-size: .75em;
+.tree-file-tag {
+  font-size: .62em;
+  letter-spacing: .05em;
+  text-transform: uppercase;
   color: var(--text-faint);
-  margin-top: .8em;
-  padding-top: .8em;
+  background: var(--bg-callout);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-faint);
+  flex: 0 0 auto;
+}
+/* nested folder/file children get extra indent */
+.tree-children .tree-folder > summary { padding-left: 1.55em; }
+.tree-children .tree-children .tree-folder > summary { padding-left: 2.75em; }
+.tree-children .tree-children .tree-children .tree-folder > summary { padding-left: 3.95em; }
+.tree-children .tree-file { padding-left: 2.75em; }
+.tree-children .tree-children .tree-file { padding-left: 3.95em; }
+.tree-children .tree-children .tree-children .tree-file { padding-left: 5.15em; }
+.sidebar-meta {
+  font-size: .72em;
+  color: var(--text-faint);
+  margin-top: 1em;
+  padding-top: .7em;
   border-top: 1px solid var(--border-faint);
 }
 .wrap-main {
@@ -1089,17 +1131,59 @@ export async function renderWrapper(
     ? `<span class="gated-pill" title="this share requires a token">🔒 gated</span>`
     : "";
 
-  // Sidebar nav links — folders + canvases. Clicks anchor-jump to the matching section.
-  const sidebarFolderLinks = folderOrder.map((folder) => {
-    const slug = folder ? folder.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "root";
-    const label = folder || "vault root";
-    const count = groups.get(folder)!.length;
-    return `<a class="sb-link" href="#folder-${slug}"><span class="sb-link-icon">📁</span><span class="sb-link-label">${escapeHtml(label)}</span><span class="sb-link-count">${count}</span></a>`;
-  }).join("");
-
-  const sidebarCanvasLinks = canvasMetas.map((c) =>
-    `<a class="sb-link" href="${shareBase}/c/${c.ulid}${tq}"><span class="sb-link-icon">🗺</span><span class="sb-link-label">${escapeHtml(c.basename)}</span></a>`
-  ).join("");
+  // Build an Obsidian-style nested file tree from notes + canvases. Both share
+  // the `path` field so we can mix them into the same tree, then render with
+  // <details>/<summary> for free expand/collapse. No JS needed.
+  type TreeFile = { kind: "note" | "canvas"; ulid: string; label: string };
+  type TreeFolder = { name: string; folders: Map<string, TreeFolder>; files: TreeFile[] };
+  const root: TreeFolder = { name: "", folders: new Map(), files: [] };
+  function ensureFolder(parts: string[]): TreeFolder {
+    let cur = root;
+    for (const seg of parts) {
+      let next = cur.folders.get(seg);
+      if (!next) {
+        next = { name: seg, folders: new Map(), files: [] };
+        cur.folders.set(seg, next);
+      }
+      cur = next;
+    }
+    return cur;
+  }
+  for (const r of records) {
+    if (!r.md) continue;
+    const parts = r.path.split("/");
+    const fileName = parts.pop()!.replace(/\.md$/i, "");
+    const folder = ensureFolder(parts);
+    folder.files.push({ kind: "note", ulid: r.ulid, label: r.title || fileName });
+  }
+  for (const c of canvasMetas) {
+    const parts = c.path.split("/");
+    const fileName = parts.pop()!.replace(/\.canvas$/i, "");
+    const folder = ensureFolder(parts);
+    folder.files.push({ kind: "canvas", ulid: c.ulid, label: fileName || c.basename });
+  }
+  function countDescendants(node: TreeFolder): number {
+    let n = node.files.length;
+    for (const sub of node.folders.values()) n += countDescendants(sub);
+    return n;
+  }
+  function renderTreeFolder(node: TreeFolder, isRoot: boolean): string {
+    const subs = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const files = [...node.files].sort((a, b) => a.label.localeCompare(b.label));
+    const childHtml = subs.map((s) => renderTreeFolder(s, false)).join("") +
+      files.map((f) => {
+        const href = f.kind === "canvas"
+          ? `${shareBase}/c/${f.ulid}${tq}`
+          : `${shareBase}/${f.ulid}${tq}`;
+        const tag = f.kind === "canvas"
+          ? `<span class="tree-file-tag">canvas</span>` : "";
+        return `<a class="tree-file" href="${href}"><span class="tree-file-name">${escapeHtml(f.label)}</span>${tag}</a>`;
+      }).join("");
+    if (isRoot) return childHtml;
+    const total = countDescendants(node);
+    return `<details class="tree-folder" open><summary><span class="tree-chevron">▶</span><span class="tree-folder-name">${escapeHtml(node.name)}</span><span class="tree-folder-count">${total}</span></summary><div class="tree-children">${childHtml}</div></details>`;
+  }
+  const sidebarTreeHtml = renderTreeFolder(root, true);
 
   const assetCount = wrap.assets ? Object.keys(wrap.assets).length : 0;
 
@@ -1119,17 +1203,10 @@ export async function renderWrapper(
 
     <a class="sidebar-cta" href="${shareBase}/download${tq}" download>⬇ Download as .zip</a>
 
-    ${sidebarFolderLinks ? `
     <div class="sidebar-section">
-      <div class="sidebar-section-title">Folders</div>
-      <nav class="sidebar-nav">${sidebarFolderLinks}</nav>
-    </div>` : ""}
-
-    ${sidebarCanvasLinks ? `
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Canvases (${canvasMetas.length})</div>
-      <nav class="sidebar-nav">${sidebarCanvasLinks}</nav>
-    </div>` : ""}
+      <div class="sidebar-section-title">Files</div>
+      <div class="tree">${sidebarTreeHtml}</div>
+    </div>
 
     <div class="sidebar-meta">${records.length} note${records.length === 1 ? "" : "s"}${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset${assetCount === 1 ? "" : "s"}` : ""}</div>
   </div>
