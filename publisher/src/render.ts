@@ -285,15 +285,75 @@ blockquote {
   border: 1px solid var(--border-faint);
   z-index: 4;
 }
-#canvas-svg {
-  width: 100%; height: 100%;
+/* Stage = the inner pannable/zoomable layer. We use HTML positioning + a
+   single CSS transform here instead of SVG foreignObject because Safari
+   refuses to apply SVG viewBox transforms to foreignObject children, which
+   meant cards rendered at native size and overflowed the host. Pure HTML
+   sidesteps the bug entirely and is also what Obsidian does internally. */
+.canvas-stage {
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;             /* size doesn't matter — we use overflow:visible */
+  transform-origin: 0 0;
   cursor: grab;
+}
+.canvas-stage.grabbing { cursor: grabbing; }
+#canvas-host {
   background:
     radial-gradient(circle at 1px 1px, var(--border-faint) 1px, transparent 1px) 0 0 / 24px 24px;
 }
-.canvas-text, .canvas-file, .canvas-link {
-  width: 100%; height: 100%;
+.canvas-edges-layer {
+  position: absolute;
+  top: 0; left: 0;
+  width: 1px; height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+.canvas-card {
+  position: absolute;
+  background: var(--bg-primary);
+  border: 2px solid;
+  border-radius: 8px;
+  color: var(--text-normal);
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.45;
+  box-sizing: border-box;
   padding: 10px 14px;
+}
+.canvas-card.canvas-text { overflow: auto; }
+.canvas-card > :first-child { margin-top: 0; }
+.canvas-card > :last-child { margin-bottom: 0; }
+.canvas-card h1, .canvas-card h2 { margin-top: .3em; margin-bottom: .25em; font-size: 1.1em; }
+.canvas-card.canvas-file {
+  display: flex; flex-direction: column; justify-content: center;
+  text-decoration: none !important;
+}
+.canvas-card.canvas-file:hover { background: var(--bg-chip); }
+.canvas-card.canvas-link {
+  display: flex; align-items: center; gap: .4em;
+  font-size: .85em;
+  color: var(--text-link);
+  text-decoration: none !important;
+  word-break: break-all;
+}
+.canvas-group {
+  position: absolute;
+  border: 2px dashed;
+  border-radius: 12px;
+  box-sizing: border-box;
+  background: rgba(168, 130, 255, 0.04);
+  pointer-events: none;
+}
+.canvas-group-label {
+  position: absolute;
+  top: 6px; left: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: inherit;
+}
+/* Legacy classes kept for any non-canvas users */
+.canvas-text, .canvas-file, .canvas-link {
   background: var(--bg-primary);
   border: 2px solid;
   border-radius: 8px;
@@ -1788,20 +1848,25 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
   const groups = canvas.nodes.filter((n) => n.type === "group");
   const others = canvas.nodes.filter((n) => n.type !== "group");
 
-  const renderTextNode = (n: CanvasNode) => {
+  // HTML-positioned cards. Each card uses absolute positioning in the SAME
+  // coordinate space as the canvas-edges SVG overlay, so a single CSS
+  // transform on .canvas-stage pans/zooms both. Sidesteps Safari's
+  // foreignObject + viewBox bug.
+  const posStyle = (n: CanvasNode) =>
+    `left:${n.x}px;top:${n.y}px;width:${n.width}px;height:${n.height}px`;
+
+  const renderTextCard = (n: CanvasNode) => {
     const md = n.text ?? "";
     const html = marked.parse(md, { async: false }) as string;
     const color = canvasColor(n.color);
-    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">
-      <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-text" style="border-color:${color}">${html}</div>
-    </foreignObject>`;
+    return `<div class="canvas-card canvas-text" style="${posStyle(n)};border-color:${color}">${html}</div>`;
   };
 
-  const renderFileNode = (n: CanvasNode) => {
+  const renderFileCard = (n: CanvasNode) => {
     const file = (n.file ?? "").trim();
     const basename = file.split("/").pop()?.replace(/\.md$/i, "") ?? file;
     const color = canvasColor(n.color);
-    let inner = `<div class="canvas-file-name">📄 ${escapeHtml(basename)}</div>`;
+    const inner = `<div class="canvas-file-name">📄 ${escapeHtml(basename)}</div>`;
     let href: string | null = null;
     if (ctx?.shareBase) {
       const u = ctx.shareSet?.get(basename);
@@ -1811,34 +1876,28 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
         if (cu) href = `${ctx.shareBase}/c/${cu}${tq}`;
       }
     }
-    const link = href
-      ? `<a xmlns="http://www.w3.org/1999/xhtml" href="${escapeAttr(href)}" class="canvas-file" style="border-color:${color}">${inner}</a>`
-      : `<div xmlns="http://www.w3.org/1999/xhtml" class="canvas-file canvas-file-private" style="border-color:${color}">${inner}<div class="canvas-file-private-note">not in this share</div></div>`;
-    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">${link}</foreignObject>`;
+    return href
+      ? `<a class="canvas-card canvas-file" href="${escapeAttr(href)}" style="${posStyle(n)};border-color:${color}">${inner}</a>`
+      : `<div class="canvas-card canvas-file canvas-file-private" style="${posStyle(n)};border-color:${color}">${inner}<div class="canvas-file-private-note">not in this share</div></div>`;
   };
 
-  const renderLinkNode = (n: CanvasNode) => {
+  const renderLinkCard = (n: CanvasNode) => {
     const url = n.url ?? "";
     const color = canvasColor(n.color);
-    return `<foreignObject x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}">
-      <a xmlns="http://www.w3.org/1999/xhtml" href="${escapeAttr(url)}" class="canvas-link" style="border-color:${color}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>
-    </foreignObject>`;
+    return `<a class="canvas-card canvas-link" href="${escapeAttr(url)}" target="_blank" rel="noopener" style="${posStyle(n)};border-color:${color}">🔗 ${escapeHtml(url)}</a>`;
   };
 
-  const renderGroupNode = (n: CanvasNode) => {
+  const renderGroupBox = (n: CanvasNode) => {
     const color = canvasColor(n.color);
     const label = n.label ?? "";
-    return `<g class="canvas-group">
-      <rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="12" fill="${color}" fill-opacity="0.08" stroke="${color}" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="6 4"/>
-      ${label ? `<text x="${n.x + 12}" y="${n.y + 22}" font-size="16" font-weight="600" fill="${color}">${escapeHtml(label)}</text>` : ""}
-    </g>`;
+    return `<div class="canvas-group" style="${posStyle(n)};color:${color};border-color:${color};background:${color}1a">${label ? `<div class="canvas-group-label">${escapeHtml(label)}</div>` : ""}</div>`;
   };
 
-  const groupSvg = groups.map(renderGroupNode).join("\n");
-  const otherSvg = others.map((n) => {
-    if (n.type === "text") return renderTextNode(n);
-    if (n.type === "file") return renderFileNode(n);
-    if (n.type === "link") return renderLinkNode(n);
+  const groupHtml = groups.map(renderGroupBox).join("\n");
+  const cardHtml = others.map((n) => {
+    if (n.type === "text") return renderTextCard(n);
+    if (n.type === "file") return renderFileCard(n);
+    if (n.type === "link") return renderLinkCard(n);
     return "";
   }).join("\n");
 
@@ -1878,19 +1937,26 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
   }).join("\n") ?? "";
 
   const breadcrumb = renderBreadcrumb(ctx, title);
+  // The .canvas-stage contains everything that needs to pan/zoom together —
+  // group boxes, an absolutely-positioned SVG layer for edges (overflow:visible
+  // so paths can extend in any direction from origin 0,0), then the cards on
+  // top. A single CSS transform on the stage drives both pan and zoom; this
+  // is what Obsidian does internally and avoids every Safari foreignObject bug.
   const canvasBody = `<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
 <p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s)</p>
 <div class="canvas-host" id="canvas-host">
-  <svg id="canvas-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M0,0 L10,5 L0,10 z" fill="#888" />
-      </marker>
-    </defs>
-    <g id="canvas-edges">${edgeSvg}</g>
-    <g id="canvas-groups">${groupSvg}</g>
-    <g id="canvas-nodes">${otherSvg}</g>
-  </svg>
+  <div class="canvas-stage" id="canvas-stage" data-vbx="${vbX}" data-vby="${vbY}" data-vbw="${vbW}" data-vbh="${vbH}">
+    ${groupHtml}
+    <svg class="canvas-edges-layer" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#888" />
+        </marker>
+      </defs>
+      ${edgeSvg}
+    </svg>
+    ${cardHtml}
+  </div>
   <div class="canvas-rail" id="canvas-rail">
     <button id="canvas-zoom-in"  type="button" title="Zoom in (=)">+</button>
     <button id="canvas-zoom-out" type="button" title="Zoom out (-)">−</button>
@@ -1951,76 +2017,100 @@ ${canvasBody}
 
 const CANVAS_PAN_ZOOM = `<script>
 (function(){
-  const svg = document.getElementById("canvas-svg");
   const host = document.getElementById("canvas-host");
-  if (!svg || !host) return;
-  const initial = svg.getAttribute("viewBox").split(/\\s+/).map(Number);
-  let [vx, vy, vw, vh] = initial;
-  const apply = () => svg.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
-  const reset = () => { [vx, vy, vw, vh] = initial; apply(); };
+  const stage = document.getElementById("canvas-stage");
+  if (!host || !stage) return;
+  const vbX = +stage.dataset.vbx, vbY = +stage.dataset.vby;
+  const vbW = +stage.dataset.vbw, vbH = +stage.dataset.vbh;
 
-  // Safari workaround — without explicit pixel width/height attributes on
-  // the SVG, Safari fails to apply the viewBox transform to <foreignObject>
-  // children, so canvas cards render at native size and overflow the host.
-  // Setting concrete attributes (and refreshing on resize) makes Safari
-  // honour preserveAspectRatio + viewBox the same way Chrome/Firefox do.
-  const fitSvg = () => {
-    const rect = host.getBoundingClientRect();
-    svg.setAttribute("width", Math.max(1, Math.floor(rect.width)));
-    svg.setAttribute("height", Math.max(1, Math.floor(rect.height)));
-  };
-  fitSvg();
-  window.addEventListener("resize", fitSvg);
+  // Stage coords use raw canvas-space pixels. We translate so vbX/vbY map to
+  // the host's top-left, then scale so the whole content fits the host.
+  let scale = 1, tx = 0, ty = 0;
 
-  // Wheel zoom (anchored at cursor)
-  svg.addEventListener("wheel", (e) => {
+  function apply() {
+    stage.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+  }
+
+  function fit() {
+    const r = host.getBoundingClientRect();
+    const margin = 24;
+    const sx = (r.width  - margin * 2) / vbW;
+    const sy = (r.height - margin * 2) / vbH;
+    scale = Math.min(sx, sy);
+    tx = (r.width  - vbW * scale) / 2 - vbX * scale;
+    ty = (r.height - vbH * scale) / 2 - vbY * scale;
+    apply();
+  }
+
+  fit();
+  window.addEventListener("resize", fit);
+
+  // Wheel zoom anchored at cursor (works in Safari, Chrome, Firefox).
+  host.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const rect = svg.getBoundingClientRect();
-    const mx = vx + (e.clientX - rect.left) / rect.width * vw;
-    const my = vy + (e.clientY - rect.top) / rect.height * vh;
-    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-    vw *= factor; vh *= factor;
-    vx = mx - (e.clientX - rect.left) / rect.width * vw;
-    vy = my - (e.clientY - rect.top) / rect.height * vh;
+    const r = host.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const newScale = Math.max(0.05, Math.min(8, scale * factor));
+    // keep the point under cursor stationary in screen space
+    tx = mx - (mx - tx) * (newScale / scale);
+    ty = my - (my - ty) * (newScale / scale);
+    scale = newScale;
     apply();
   }, { passive: false });
 
-  // Drag to pan
-  let dragging = false, lastX = 0, lastY = 0;
-  svg.addEventListener("mousedown", (e) => {
-    if (e.target.closest("a, foreignObject a")) return; // don't pan on link drag
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
-    svg.style.cursor = "grabbing";
+  // Drag to pan — but don't hijack clicks on cards/links. Mousedown on a card
+  // starts a "click candidate"; we only treat it as a pan if the user actually
+  // moves the cursor more than 4px before releasing.
+  let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, decided = false;
+  host.addEventListener("mousedown", (e) => {
+    dragging = true; decided = false;
+    lastX = downX = e.clientX; lastY = downY = e.clientY;
   });
   window.addEventListener("mousemove", (e) => {
     if (!dragging) return;
-    const rect = svg.getBoundingClientRect();
-    const dx = (e.clientX - lastX) / rect.width * vw;
-    const dy = (e.clientY - lastY) / rect.height * vh;
-    vx -= dx; vy -= dy;
+    if (!decided) {
+      if (Math.abs(e.clientX - downX) < 4 && Math.abs(e.clientY - downY) < 4) return;
+      decided = true;
+      stage.classList.add("grabbing");
+    }
+    tx += e.clientX - lastX;
+    ty += e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     apply();
   });
-  window.addEventListener("mouseup", () => { dragging = false; svg.style.cursor = ""; });
+  window.addEventListener("mouseup", () => {
+    dragging = false;
+    stage.classList.remove("grabbing");
+  });
+  // If the user starts on a link, swallow the click that would otherwise navigate
+  // when they were really panning.
+  host.addEventListener("click", (e) => {
+    if (decided) e.preventDefault();
+  }, true);
 
-  // Programmatic zoom anchored at the centre of the SVG (used by toolbar buttons + keys)
+  // Programmatic zoom from buttons / keys — anchored at the host's centre.
   function zoomAt(factor) {
-    const cx = vx + vw / 2;
-    const cy = vy + vh / 2;
-    vw *= factor; vh *= factor;
-    vx = cx - vw / 2; vy = cy - vh / 2;
+    const r = host.getBoundingClientRect();
+    const cx = r.width / 2, cy = r.height / 2;
+    const newScale = Math.max(0.05, Math.min(8, scale * factor));
+    tx = cx - (cx - tx) * (newScale / scale);
+    ty = cy - (cy - ty) * (newScale / scale);
+    scale = newScale;
     apply();
   }
-  function fitToScreen() { reset(); }
   function toggleFullscreen() {
     if (document.fullscreenElement) document.exitFullscreen();
     else host.requestFullscreen?.();
   }
+  // Re-fit after entering/leaving fullscreen so the content fills the new size
+  document.addEventListener("fullscreenchange", () => setTimeout(fit, 50));
 
-  document.getElementById("canvas-reset")?.addEventListener("click", reset);
-  document.getElementById("canvas-fit")?.addEventListener("click", fitToScreen);
-  document.getElementById("canvas-zoom-in")?.addEventListener("click", () => zoomAt(1 / 1.2));
-  document.getElementById("canvas-zoom-out")?.addEventListener("click", () => zoomAt(1.2));
+  document.getElementById("canvas-reset")?.addEventListener("click", fit);
+  document.getElementById("canvas-fit")?.addEventListener("click", fit);
+  document.getElementById("canvas-zoom-in")?.addEventListener("click", () => zoomAt(1.2));
+  document.getElementById("canvas-zoom-out")?.addEventListener("click", () => zoomAt(1 / 1.2));
   document.getElementById("canvas-fullscreen")?.addEventListener("click", toggleFullscreen);
   const tip = document.getElementById("canvas-tip");
   document.getElementById("canvas-help")?.addEventListener("click", (e) => {
@@ -2028,11 +2118,10 @@ const CANVAS_PAN_ZOOM = `<script>
     tip?.classList.toggle("visible");
   });
   document.addEventListener("click", () => tip?.classList.remove("visible"));
+  host.addEventListener("dblclick", fit);
 
-  svg.addEventListener("dblclick", reset);
-
-  // Keyboard shortcuts — only fire when canvas-host is hovered or focused, so
-  // they don't intercept typing elsewhere on the page.
+  // Keyboard shortcuts — only fire when the canvas is hovered, so they don't
+  // hijack typing elsewhere on the page.
   let hostHover = false;
   host.addEventListener("mouseenter", () => { hostHover = true; });
   host.addEventListener("mouseleave", () => { hostHover = false; });
@@ -2040,13 +2129,13 @@ const CANVAS_PAN_ZOOM = `<script>
     if (!hostHover) return;
     if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
     switch (e.key) {
-      case "=": case "+": e.preventDefault(); zoomAt(1 / 1.2); break;
-      case "-": case "_": e.preventDefault(); zoomAt(1.2); break;
+      case "=": case "+": e.preventDefault(); zoomAt(1.2); break;
+      case "-": case "_": e.preventDefault(); zoomAt(1 / 1.2); break;
       case "f": case "F":
         if (e.shiftKey) { e.preventDefault(); toggleFullscreen(); }
-        else { e.preventDefault(); fitToScreen(); }
+        else { e.preventDefault(); fit(); }
         break;
-      case "r": case "R": e.preventDefault(); reset(); break;
+      case "r": case "R": e.preventDefault(); fit(); break;
     }
   });
 })();
