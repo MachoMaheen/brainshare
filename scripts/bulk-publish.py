@@ -98,6 +98,13 @@ def main() -> int:
         if not md.is_file():
             continue
         text = md.read_text(encoding="utf-8")
+        # Skip files that are frontmatter-only (or empty). Publishing those creates
+        # ULID-only KV entries that render as "empty note" placeholders for recipients.
+        body_only = re.sub(r"^---\n.*?\n---\n?", "", text, count=1, flags=re.DOTALL)
+        if not body_only.strip():
+            rel = md.relative_to(vault)
+            print(f"SKIP   (empty body)        {rel}")
+            continue
         new_text, ulid_, stamped = stamp(text)
         if stamped:
             md.write_text(new_text, encoding="utf-8")

@@ -104,9 +104,16 @@ def main() -> int:
         rel = str(f.relative_to(vault))
         ext = f.suffix.lower()
 
-        # Markdown notes — stamp + publish
+        # Markdown notes — stamp + publish, but skip files that are body-empty
+        # (frontmatter only, or zero bytes). Publishing them creates ULID-only
+        # entries in KV that render as "empty note" placeholders for recipients.
         if ext == ".md":
             text = f.read_text(encoding="utf-8")
+            # Strip frontmatter to inspect actual body content
+            body_only = re.sub(r"^---\n.*?\n---\n?", "", text, count=1, flags=re.DOTALL)
+            if not body_only.strip():
+                print(f"SKIP   (empty body)        {rel}", flush=True)
+                continue
             new_text, ulid_, stamped = stamp_id(text)
             if stamped:
                 f.write_text(new_text, encoding="utf-8")

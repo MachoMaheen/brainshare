@@ -166,6 +166,17 @@ blockquote {
 }
 .wikilink-internal:hover { background: var(--bg-chip); }
 .wikilink-canvas { font-size: .95em; }
+.empty-note-placeholder {
+  padding: 2em 1.5em;
+  margin: 1em 0;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.empty-note-placeholder p { margin: 0.4em 0; }
+.empty-note-placeholder em { font-size: 1.1em; }
 .embedded-image {
   display: block; max-width: 100%; height: auto;
   border-radius: 6px; margin: 1em auto;
@@ -722,7 +733,11 @@ export interface RenderCtx {
 
 export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
   const { fm, body: rawBody } = parseFrontmatter(md);
-  const title = (fm?.byKey.get("title") as string) ?? ulid;
+  // Title falls back through: frontmatter title → filename basename (from ctx.path) → ULID.
+  // The filename is what the user actually recognises; ULID is only the last resort
+  // for orphan notes published without path metadata.
+  const fileTitle = ctx?.path?.split("/").pop()?.replace(/\.md$/i, "");
+  const title = (fm?.byKey.get("title") as string) || fileTitle || ulid;
 
   const tq = ctx?.tokenQuery ?? "";
   // Strip a leading H1 that duplicates the title — otherwise the page renders
@@ -789,7 +804,17 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     }
   );
 
-  const html = marked.parse(body, { async: false }) as string;
+  const rawHtml = marked.parse(body, { async: false }) as string;
+  // Notes that are just frontmatter (or were stamped on an empty file) render to an
+  // empty body. Without a placeholder, the page is just a title + properties panel
+  // and looks broken. Surface that this is a real-but-empty note instead.
+  const trimmedHtml = rawHtml.trim();
+  const html = trimmedHtml.length > 0
+    ? rawHtml
+    : `<div class="empty-note-placeholder">
+        <p><em>This note has no content in the source vault.</em></p>
+        <p class="setting-item-description">Only frontmatter (e.g. ULID, tags) is published — no body text was written. Open the source file in Obsidian to add content, then re-publish.</p>
+      </div>`;
   const breadcrumb = renderBreadcrumb(ctx, title);
   const props = renderProperties(fm, ulid);
 
@@ -995,6 +1020,7 @@ ${folderSections.join("")}
 <div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${wrap.assets ? ` · ${Object.keys(wrap.assets).length} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/build/graphology-layout-forceatlas2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
 <script>
 (function(){
@@ -1019,13 +1045,17 @@ ${folderSections.join("")}
     degree[e.to]   = (degree[e.to]   || 0) + 1;
   });
 
+  // Seed nodes on a circle then let ForceAtlas2 spread them properly.
+  // Random initial offset breaks symmetry — pure circular start makes FA2 oscillate
+  // for graphs with high symmetry.
   DATA.nodes.forEach(function(n,i){
     var theta = (i / DATA.nodes.length) * 2 * Math.PI;
     var d = degree[n.id] || 0;
     g.addNode(n.id, {
       label: n.label,
-      x: Math.cos(theta), y: Math.sin(theta),
-      size: 5 + Math.min(d, 10) * 1.1,
+      x: Math.cos(theta) + (Math.random() - 0.5) * 0.1,
+      y: Math.sin(theta) + (Math.random() - 0.5) * 0.1,
+      size: 5 + Math.min(d, 10) * 1.2,
       color: nodeColor,
     });
   });
@@ -1035,50 +1065,36 @@ ${folderSections.join("")}
     }
   });
 
-  // Force-directed settle. Repulsion (inverse-square) + spring (along edges)
-  // with cooling to prevent oscillation. Tuned so nodes spread to readable spacing.
-  var ITERATIONS = 180;
-  var REST_LEN = 1.5;
-  var REPULSION = 0.15;
-  for (var iter = 0; iter < ITERATIONS; iter++) {
-    var alpha = 1 - iter / ITERATIONS; // cooling: forces shrink over time
-    var pos = {};
-    g.forEachNode(function(n, a){ pos[n] = { x: a.x, y: a.y, fx: 0, fy: 0 }; });
-    g.forEachNode(function(n1){
-      g.forEachNode(function(n2){
-        if (n1 === n2) return;
-        var dx = pos[n1].x - pos[n2].x;
-        var dy = pos[n1].y - pos[n2].y;
-        var d2 = dx*dx + dy*dy + 0.01;
-        var f = REPULSION / d2;
-        pos[n1].fx += dx * f;
-        pos[n1].fy += dy * f;
-      });
-    });
-    g.forEachEdge(function(_e, _a, src, tgt){
-      var dx = pos[tgt].x - pos[src].x;
-      var dy = pos[tgt].y - pos[src].y;
-      var d  = Math.sqrt(dx*dx + dy*dy) + 0.01;
-      var f  = (d - REST_LEN) * 0.08;
-      pos[src].fx += dx/d * f;
-      pos[src].fy += dy/d * f;
-      pos[tgt].fx -= dx/d * f;
-      pos[tgt].fy -= dy/d * f;
-    });
-    g.forEachNode(function(n){
-      // clamp per-step displacement so a single bad iteration can't fling a node off-canvas
-      var fx = Math.max(-0.5, Math.min(0.5, pos[n].fx * alpha));
-      var fy = Math.max(-0.5, Math.min(0.5, pos[n].fy * alpha));
-      g.setNodeAttribute(n, "x", pos[n].x + fx);
-      g.setNodeAttribute(n, "y", pos[n].y + fy);
+  // ForceAtlas2 — the same family of layouts Gephi/Obsidian use. Scales O(N log N)
+  // via Barnes-Hut, handles 100s–1000s of nodes cleanly. Iterations scale with
+  // graph size; small graphs settle fast, big ones get more passes.
+  var faIters = Math.max(200, Math.min(800, Math.round(50 * Math.log2(DATA.nodes.length + 2))));
+  if (typeof graphologyLibrary !== "undefined" && graphologyLibrary.layoutForceAtlas2) {
+    graphologyLibrary.layoutForceAtlas2.assign(g, {
+      iterations: faIters,
+      settings: {
+        gravity: 1,
+        scalingRatio: 12,         // higher = more spread
+        slowDown: 8,              // damping; higher = smoother settle
+        barnesHutOptimize: DATA.nodes.length > 50,
+        barnesHutTheta: 0.5,
+        strongGravityMode: false,
+        adjustSizes: true,        // respect node size for collision spacing
+        edgeWeightInfluence: 0,
+        linLogMode: false,
+      }
     });
   }
 
   var renderer = new Sigma(g, document.getElementById("graph"), {
     labelColor: { color: labelColor },
     labelSize: 12,
-    labelDensity: 0.7,
-    labelGridCellSize: 80,
+    // Sparser labels for large graphs — Sigma drops labels that don't fit at
+    // current zoom. With 100+ nodes the lower density prevents the soup-of-text
+    // problem visible on the wrapper landing previously.
+    labelDensity: DATA.nodes.length > 50 ? 0.25 : 0.7,
+    labelGridCellSize: DATA.nodes.length > 50 ? 140 : 80,
+    labelRenderedSizeThreshold: DATA.nodes.length > 50 ? 8 : 0,
     renderEdgeLabels: false,
     defaultEdgeColor: edgeColor,
     minCameraRatio: 0.05,
