@@ -569,19 +569,296 @@ export default {
     }
 
     if (path === "/" && req.method === "GET") {
-      return html(`<!doctype html><html><head><meta charset="utf-8"><title>BrainShare publisher</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:4em auto;padding:0 1em;color:#1f2328}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}</style>
-</head><body><h1>BrainShare publisher</h1>
-<p>API:</p>
-<ul>
-  <li><code>PUT  /api/notes/:ulid</code> — store a note (auth)</li>
-  <li><code>GET  /:ulid</code> — render a note (standalone, all wikilinks private)</li>
-  <li><code>PUT  /api/wrappers/:id</code> — store a wrapper (auth, optional <code>gated:true</code>)</li>
-  <li><code>POST /api/wrappers/:id/tokens</code> — mint an access token (auth)</li>
-  <li><code>POST /api/wrappers/:id/revoke</code> — revoke by jti (auth)</li>
-  <li><code>GET  /share/:id</code> — wrapper landing (gated wrappers need <code>?t=…</code>)</li>
-  <li><code>GET  /share/:id/:ulid</code> — note scoped to a share-set</li>
-</ul></body></html>`);
+      // DEMO_WRAP_URL — set to a real wrapper URL (e.g. /share/<id>?t=<jwt>) before
+      // public launch so the "Try the live demo" CTA goes somewhere useful. Until set,
+      // the CTA falls back to a "demo coming soon" state. Configure via env (set
+      // DEMO_WRAP_URL on the worker) or just edit the constant below.
+      const demoUrl = (env as unknown as { DEMO_WRAP_URL?: string }).DEMO_WRAP_URL ?? "";
+      const repoUrl = "https://github.com/MachoMaheen/brainshare";
+      const ctaPrimary = demoUrl
+        ? `<a class="cta cta-primary" href="${demoUrl}">▶ Try the live demo</a>`
+        : `<a class="cta cta-primary cta-disabled" href="${repoUrl}">▶ Live demo (coming soon)</a>`;
+      return html(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BrainShare — publish slices of your Obsidian vault, free</title>
+<meta name="description" content="Open-source publisher for Obsidian. Pick notes + canvases, get a shareable URL with full-text search, JWT-gated access, and an interactive graph. Runs on Cloudflare's free tier.">
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-2: #f5f6f8;
+  --bg-card: #ffffff;
+  --text: #1f2328;
+  --text-2: #57606a;
+  --muted: #8b949e;
+  --accent: #7f6df2;
+  --accent-2: #5b4ad6;
+  --border: #e6e8eb;
+  --border-faint: #eef0f2;
+  --code-bg: #f6f8fa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1014;
+    --bg-2: #16181d;
+    --bg-card: #1a1c22;
+    --text: #e6e8ee;
+    --text-2: #a8aebd;
+    --muted: #6a6f80;
+    --accent: #a882ff;
+    --accent-2: #c2a7ff;
+    --border: #2a2d35;
+    --border-faint: #1f2228;
+    --code-bg: #1a1c22;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 1.25em; }
+header.hero {
+  padding: 5em 0 3em;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at top, rgba(168,130,255,.12), transparent 60%),
+    var(--bg);
+  border-bottom: 1px solid var(--border-faint);
+}
+.brand {
+  display: inline-flex; align-items: center; gap: .55em;
+  font-size: .85em;
+  color: var(--text-2);
+  letter-spacing: .04em;
+  margin-bottom: 1.2em;
+}
+.brand-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 14px var(--accent);
+}
+h1 {
+  margin: 0 0 .35em;
+  font-size: clamp(2em, 5vw, 3.2em);
+  letter-spacing: -.02em;
+  font-weight: 700;
+  line-height: 1.05;
+}
+.tagline {
+  font-size: clamp(1.05em, 2vw, 1.25em);
+  color: var(--text-2);
+  margin: 0 auto 2em;
+  max-width: 38em;
+}
+.ctas { display: flex; gap: .75em; justify-content: center; flex-wrap: wrap; }
+.cta {
+  display: inline-flex; align-items: center; gap: .4em;
+  padding: .75em 1.4em;
+  font-size: 1em; font-weight: 500;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: transform .12s, box-shadow .12s, background .12s;
+}
+.cta-primary { background: var(--accent); color: #fff; }
+.cta-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(127,109,242,.35); }
+.cta-disabled { opacity: .55; cursor: not-allowed; }
+.cta-disabled:hover { transform: none; box-shadow: none; }
+.cta-secondary {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.cta-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+section { padding: 3.5em 0; border-bottom: 1px solid var(--border-faint); }
+section h2 {
+  font-size: 1.5em;
+  margin: 0 0 1em;
+  letter-spacing: -.01em;
+}
+.feature-grid {
+  display: grid;
+  gap: 1em;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.feature {
+  background: var(--bg-card);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  padding: 1.2em 1.4em;
+}
+.feature-icon { font-size: 1.4em; line-height: 1; }
+.feature h3 {
+  font-size: 1em; margin: .5em 0 .3em;
+  font-weight: 600;
+}
+.feature p { margin: 0; font-size: .92em; color: var(--text-2); }
+
+.versus {
+  background: var(--bg-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  padding: 1.2em 1.4em;
+  display: grid;
+  gap: .8em;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.versus-col h4 { margin: 0 0 .25em; font-size: .8em; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.versus-col p  { margin: 0; font-size: .92em; color: var(--text-2); }
+
+pre, code {
+  font-family: "SF Mono", "Menlo", ui-monospace, monospace;
+}
+.codeblock {
+  background: var(--code-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  padding: .9em 1.1em;
+  overflow-x: auto;
+  font-size: .88em;
+  line-height: 1.55;
+  margin: 0;
+}
+.codeblock .c { color: var(--muted); }
+ol.steps { padding-left: 1.2em; margin: 0; }
+ol.steps li { margin: .6em 0; color: var(--text-2); }
+ol.steps li b { color: var(--text); }
+
+footer {
+  padding: 3em 0 4em;
+  text-align: center;
+  font-size: .88em;
+  color: var(--muted);
+}
+footer a { color: var(--text-2); }
+footer a:hover { color: var(--accent); }
+
+details.api-ref { margin-top: 2em; }
+details.api-ref summary {
+  cursor: pointer;
+  font-size: .9em;
+  color: var(--text-2);
+  padding: .6em 0;
+}
+details.api-ref summary:hover { color: var(--accent); }
+details.api-ref ul { margin: .8em 0 0; padding-left: 1.2em; font-size: .88em; color: var(--text-2); }
+details.api-ref code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="brand"><span class="brand-dot"></span>BrainShare · open source · MIT</div>
+    <h1>Publish slices of your Obsidian vault — for real.</h1>
+    <p class="tagline">Pick notes and canvases. Get a shareable URL with an interactive graph, full-text search, and per-recipient JWT access. No accounts. No vendor lock-in. Free.</p>
+    <div class="ctas">
+      ${ctaPrimary}
+      <a class="cta cta-secondary" href="${repoUrl}">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What you get when you share a slice</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">🕸</div>
+        <h3>Interactive graph view</h3>
+        <p>Sigma.js force-directed graph that mirrors your Obsidian graph view — hover to focus a cluster, click to open.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔎</div>
+        <h3>Full-text + filename search</h3>
+        <p>⌘K palette searches every note body in the slice. Sidebar filter narrows the file tree as you type.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔒</div>
+        <h3>Per-recipient JWT auth</h3>
+        <p>Mint a token per viewer. Expirable, revocable, optional view-count cap. No login screens.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🗺</div>
+        <h3>Canvases render natively</h3>
+        <p>Colors, groups, bezier edges, file embeds — Obsidian's <code>.canvas</code> spec, faithfully.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔗</div>
+        <h3>Wikilinks resolve correctly</h3>
+        <p>Links inside the share-set work. Targets outside become greyed-out "🔒 not in this share" labels — no leaks.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>Cloudflare free tier</h3>
+        <p>Worker + KV. ~1000 publishes/day before you pay anything. Globally cached reads.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why not Quartz or Obsidian Publish?</h2>
+    <div class="versus">
+      <div class="versus-col">
+        <h4>Quartz</h4>
+        <p>Great for "publish my whole vault." Static site setup, full-rebuild per change, no per-recipient gating.</p>
+      </div>
+      <div class="versus-col">
+        <h4>Obsidian Publish</h4>
+        <p>Zero-config but $8–10/mo per site, all-or-nothing visibility, no programmatic API.</p>
+      </div>
+      <div class="versus-col">
+        <h4>BrainShare</h4>
+        <p><b>Per-slice publishing</b> with a live graph + auth, free on Cloudflare's tier, full programmatic API.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Get it</h2>
+    <ol class="steps">
+      <li><b>Beta install via BRAT</b> (Obsidian community-store PR pending review): add <code>MachoMaheen/brainshare</code> as a beta plugin.</li>
+      <li><b>Deploy your own publisher</b> — clone the repo, <code>wrangler deploy</code>. Two minutes on Cloudflare's free tier:
+<pre class="codeblock"><span class="c"># in the publisher/ folder</span>
+npm install
+wrangler kv:namespace create NOTES
+wrangler deploy</pre>
+      </li>
+      <li><b>Open the BrainShare panel in Obsidian</b>, point it at your worker URL, pick a slice, hit publish — get a URL like <code>https://your-publisher/share/&lt;slice&gt;?t=&lt;jwt&gt;</code>.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a href="${repoUrl}">github.com/MachoMaheen/brainshare</a> · MIT
+    <details class="api-ref">
+      <summary>API reference (for integrators)</summary>
+      <ul>
+        <li><code>PUT  /api/notes/:ulid</code> — store a note (auth)</li>
+        <li><code>GET  /:ulid</code> — render a note (standalone, all wikilinks private)</li>
+        <li><code>PUT  /api/wrappers/:id</code> — store a wrapper (auth, optional <code>gated:true</code>)</li>
+        <li><code>POST /api/wrappers/:id/tokens</code> — mint an access token (auth)</li>
+        <li><code>POST /api/wrappers/:id/revoke</code> — revoke by jti (auth)</li>
+        <li><code>GET  /share/:id</code> — wrapper landing (gated wrappers need <code>?t=…</code>)</li>
+        <li><code>GET  /share/:id/:ulid</code> — note scoped to a share-set</li>
+        <li><code>GET  /share/:id/api/search?q=…</code> — full-text search across the slice's bodies</li>
+      </ul>
+    </details>
+  </div>
+</footer>
+</body>
+</html>`);
     }
 
     return new Response("not found", { status: 404 });
