@@ -613,6 +613,57 @@ blockquote {
   font-weight: 600;
 }
 .tree-file.active .tree-file-name { color: var(--text-accent); }
+/* sidebar filter input — visible search bar above the tree */
+.sidebar-search { margin: .2em 0 .9em; position: relative; }
+.sidebar-filter-input {
+  width: 100%; box-sizing: border-box;
+  padding: 7px 10px 7px 28px;
+  font-size: .85em;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-family: inherit;
+  outline: none;
+  transition: border-color .12s, box-shadow .12s;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a8a8a' stroke-width='1.5'><circle cx='7' cy='7' r='4.5'/><line x1='10.5' y1='10.5' x2='14' y2='14' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+  background-size: 14px 14px;
+}
+.sidebar-filter-input:focus {
+  border-color: var(--text-accent);
+  box-shadow: 0 0 0 2px var(--bg-chip);
+}
+.sidebar-filter-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  height: 14px; width: 14px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' stroke='%238a8a8a' stroke-width='1.6' stroke-linecap='round'><line x1='4' y1='4' x2='12' y2='12'/><line x1='12' y1='4' x2='4' y2='12'/></svg>");
+  background-repeat: no-repeat; background-position: center;
+  cursor: pointer;
+}
+.sidebar-filter-hint {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-size: .65em; color: var(--text-faint); pointer-events: none;
+  background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px;
+}
+.sidebar-filter-input:not(:placeholder-shown) ~ .sidebar-filter-hint { display: none; }
+/* hide tree nodes filtered out — JS adds .filter-hidden during typing */
+.tree-folder.filter-hidden, .tree-file.filter-hidden { display: none !important; }
+/* highlight match within visible labels */
+.tree-folder-name mark, .tree-file-name mark {
+  background: var(--bg-chip);
+  color: var(--text-accent);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.sidebar-filter-empty {
+  font-size: .9em;
+  color: var(--text-faint);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .tree-file-name {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1194,9 +1245,13 @@ export function renderTreeSidebar(opts: {
       ${desc}
     </div>
     ${downloadLink}
+    <div class="sidebar-search">
+      <input type="search" id="sidebar-filter" class="sidebar-filter-input" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter files in sidebar">
+      <span class="sidebar-filter-hint" id="sidebar-filter-hint" aria-hidden="true">⌘K for full search</span>
+    </div>
     <div class="sidebar-section">
-      <div class="sidebar-section-title">Files</div>
-      <div class="tree">${treeHtml}</div>
+      <div class="sidebar-section-title">Files <span class="sidebar-filter-empty" id="sidebar-filter-empty" hidden>· no matches</span></div>
+      <div class="tree" id="sidebar-tree">${treeHtml}</div>
     </div>
     <div class="sidebar-meta">${meta}</div>
   </div>
@@ -1215,6 +1270,94 @@ const SIDEBAR_TOGGLE_JS = `<script>
       a.addEventListener("click", function(){ sb.classList.add("collapsed"); });
     });
   }
+
+  // ── Sidebar filter (visible search bar above the tree) ─────────────────
+  // Filters tree nodes as the user types. A folder stays visible if its name
+  // matches OR any of its descendants match (and auto-expands when matches are
+  // inside it). Matched substring gets <mark>-wrapped in the label.
+  var input = document.getElementById("sidebar-filter");
+  var tree  = document.getElementById("sidebar-tree");
+  var empty = document.getElementById("sidebar-filter-empty");
+  if (input && tree) {
+    var fileRows = Array.prototype.slice.call(tree.querySelectorAll(".tree-file"));
+    var folderRows = Array.prototype.slice.call(tree.querySelectorAll(".tree-folder"));
+    // Cache the original folder open-state so we can restore it when the
+    // filter is cleared — typing temporarily expands ancestors of matches.
+    var originalOpen = new Map();
+    folderRows.forEach(function(f){ originalOpen.set(f, f.hasAttribute("open")); });
+    var labelCache = new Map();   // element → original textContent (so we can restore after un-marking)
+    function cacheLabel(el) {
+      if (!el) return "";
+      if (labelCache.has(el)) return labelCache.get(el);
+      var t = el.textContent || "";
+      labelCache.set(el, t);
+      return t;
+    }
+    function escHtml(s) { return s.replace(/[&<>"']/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]; }); }
+    function renderLabel(el, original, q) {
+      if (!q) { el.textContent = original; return; }
+      var i = original.toLowerCase().indexOf(q.toLowerCase());
+      if (i < 0) { el.textContent = original; return; }
+      el.innerHTML = escHtml(original.slice(0,i)) + "<mark>" + escHtml(original.slice(i, i+q.length)) + "</mark>" + escHtml(original.slice(i+q.length));
+    }
+    function applyFilter(q) {
+      q = (q || "").trim().toLowerCase();
+      if (!q) {
+        // restore everything
+        fileRows.forEach(function(f){
+          f.classList.remove("filter-hidden");
+          var ln = f.querySelector(".tree-file-name");
+          if (ln) renderLabel(ln, cacheLabel(ln), "");
+        });
+        folderRows.forEach(function(f){
+          f.classList.remove("filter-hidden");
+          var fn = f.querySelector(":scope > summary .tree-folder-name");
+          if (fn) renderLabel(fn, cacheLabel(fn), "");
+          if (originalOpen.get(f)) f.setAttribute("open", ""); else f.removeAttribute("open");
+        });
+        if (empty) empty.hidden = true;
+        return;
+      }
+      // 1) mark each file as match / no-match
+      var matchCount = 0;
+      fileRows.forEach(function(row){
+        var ln = row.querySelector(".tree-file-name");
+        var label = cacheLabel(ln);
+        var hit = label.toLowerCase().indexOf(q) !== -1;
+        row.classList.toggle("filter-hidden", !hit);
+        if (hit) { renderLabel(ln, label, q); matchCount++; }
+        else if (ln) renderLabel(ln, label, "");
+      });
+      // 2) walk folders bottom-up: visible if any visible file/folder descendant
+      //    OR own name matches. Auto-open visible folders so matches are seen.
+      function folderHasVisibleDescendant(folder) {
+        var descFiles = folder.querySelectorAll(":scope .tree-file");
+        for (var i = 0; i < descFiles.length; i++) {
+          if (!descFiles[i].classList.contains("filter-hidden")) return true;
+        }
+        return false;
+      }
+      folderRows.forEach(function(folder){
+        var fn = folder.querySelector(":scope > summary .tree-folder-name");
+        var name = cacheLabel(fn);
+        var nameHit = name.toLowerCase().indexOf(q) !== -1;
+        var anyVisible = nameHit || folderHasVisibleDescendant(folder);
+        folder.classList.toggle("filter-hidden", !anyVisible);
+        if (fn) renderLabel(fn, name, nameHit ? q : "");
+        if (anyVisible) folder.setAttribute("open", "");
+      });
+      if (empty) empty.hidden = matchCount > 0;
+    }
+    var t = null;
+    input.addEventListener("input", function(){
+      clearTimeout(t);
+      t = setTimeout(function(){ applyFilter(input.value); }, 60);
+    });
+    input.addEventListener("keydown", function(e){
+      if (e.key === "Escape") { e.preventDefault(); input.value = ""; applyFilter(""); input.blur(); }
+    });
+  }
+
   // Scroll the active item into view inside the sidebar
   var active = sb && sb.querySelector(".tree-file.active");
   if (active) active.scrollIntoView({ block: "center" });
