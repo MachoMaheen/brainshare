@@ -767,6 +767,39 @@ blockquote {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cmd-empty { padding: 24px; text-align: center; color: var(--text-faint); font-size: 13px; }
+.cmd-loading { padding: 10px 16px; color: var(--text-faint); font-size: 12px; font-style: italic; }
+.cmd-section {
+  padding: 8px 16px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-faint);
+  margin-top: 4px;
+}
+.cmd-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cmd-row-main > .cmd-icon  { width: 18px; flex: 0 0 auto; opacity: .8; }
+.cmd-row-main > .cmd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-row-main > .cmd-hint  { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-snippet {
+  margin-top: 3px;
+  padding-left: 28px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cmd-snippet mark, .cmd-label mark {
+  background: var(--bg-chip);
+  color: var(--text-accent);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.cmd-item { display: block; }    /* override the flex from earlier — content rows have a sub-grid now */
 .cmd-footer {
   display: flex; gap: 16px; justify-content: flex-end;
   padding: 8px 14px;
@@ -1487,6 +1520,43 @@ export function renderCommandPalette(opts: {
     return s;
   }
 
+  // Content-search results — populated by an async fetch to /api/search when
+  // the query is 3+ chars. Held separately so the file/action match list stays
+  // instant and the content section can show a "searching…" affordance.
+  var contentResults = [];
+  var contentQuery = "";
+  var contentLoading = false;
+  var contentSeq = 0;     // monotonic so out-of-order responses get dropped
+  var contentDebounce = null;
+
+  function maybeFetchContent(q) {
+    clearTimeout(contentDebounce);
+    if (!q || q.length < 3) {
+      contentResults = []; contentQuery = ""; contentLoading = false;
+      return;
+    }
+    contentLoading = true;
+    contentDebounce = setTimeout(function(){
+      var seq = ++contentSeq;
+      var url = SHARE_BASE.split("?")[0] + "/api/search" +
+        (SHARE_BASE.indexOf("?") >= 0 ? SHARE_BASE.substring(SHARE_BASE.indexOf("?")) + "&" : "?") +
+        "q=" + encodeURIComponent(q);
+      fetch(url, { credentials: "same-origin" })
+        .then(function(r){ return r.ok ? r.json() : { matches: [] }; })
+        .then(function(data){
+          if (seq !== contentSeq) return;     // stale response
+          contentResults = (data && data.matches) || [];
+          contentQuery = q;
+          contentLoading = false;
+          render();
+        })
+        .catch(function(){
+          if (seq !== contentSeq) return;
+          contentResults = []; contentLoading = false; render();
+        });
+    }, 250);
+  }
+
   function render() {
     list.innerHTML = "";
     var q = input.value.trim();
@@ -1499,23 +1569,71 @@ export function renderCommandPalette(opts: {
         .sort(function(a,b){ return b.s - a.s; })
         .map(function(x){ return x.it; });
     }
+    // Content matches: anything from /api/search that isn't already a name-hit
+    var nameHitIds = {};
+    filtered.forEach(function(it){ if (it.id) nameHitIds[it.id] = true; });
+    var contentItems = [];
+    if (q && q.length >= 3 && contentQuery === q) {
+      contentResults.forEach(function(m){
+        if (nameHitIds[m.ulid]) return;   // don't repeat a name-hit
+        contentItems.push({
+          kind: "content",
+          id: m.ulid,
+          label: m.title,
+          hint: m.path,
+          snippet: m.snippet,
+          href: SHARE_BASE.split("?")[0] + "/" + m.ulid +
+            (SHARE_BASE.indexOf("?") >= 0 ? SHARE_BASE.substring(SHARE_BASE.indexOf("?")) : ""),
+        });
+      });
+    }
+    var combined = filtered.slice(0, 60).concat(contentItems);
+    filtered = combined;
     if (sel >= filtered.length) sel = Math.max(0, filtered.length - 1);
-    if (filtered.length === 0) {
+
+    if (filtered.length === 0 && !contentLoading) {
       list.innerHTML = '<div class="cmd-empty">No matches.</div>';
       return;
     }
-    filtered.slice(0, 60).forEach(function(it, i){
-      var icon = it.kind === "canvas" ? "🗺" : it.kind === "action" ? "⚡" : "📄";
+
+    var splitIndex = combined.length - contentItems.length;   // first content row index
+    combined.forEach(function(it, i){
+      // Section header before first content match
+      if (i === splitIndex && contentItems.length > 0) {
+        var hdr = document.createElement("div");
+        hdr.className = "cmd-section";
+        hdr.textContent = "Content matches · " + contentItems.length;
+        list.appendChild(hdr);
+      }
+      var icon = it.kind === "canvas" ? "🗺" : it.kind === "action" ? "⚡" : it.kind === "content" ? "🔎" : "📄";
       var hint = it.hint ? '<span class="cmd-hint">' + escape(it.hint) + '</span>' : "";
+      var snippetHtml = it.snippet
+        ? '<div class="cmd-snippet">' + highlight(it.snippet, q) + '</div>'
+        : "";
       var row = document.createElement("div");
       row.className = "cmd-item" + (i === sel ? " selected" : "");
       row.dataset.idx = i;
-      row.innerHTML = '<span class="cmd-icon">' + icon + '</span>' +
-        '<span class="cmd-label">' + escape(it.label) + '</span>' + hint;
+      row.innerHTML = '<div class="cmd-row-main">' +
+          '<span class="cmd-icon">' + icon + '</span>' +
+          '<span class="cmd-label">' + escape(it.label) + '</span>' +
+          hint +
+        '</div>' + snippetHtml;
       row.addEventListener("mouseenter", function(){ sel = i; updateSel(); });
       row.addEventListener("click", function(){ go(it); });
       list.appendChild(row);
     });
+    if (contentLoading && contentQuery !== q) {
+      var l = document.createElement("div");
+      l.className = "cmd-loading";
+      l.textContent = "Searching note bodies…";
+      list.appendChild(l);
+    }
+  }
+  function highlight(text, q) {
+    if (!q) return escape(text);
+    var i = text.toLowerCase().indexOf(q.toLowerCase());
+    if (i < 0) return escape(text);
+    return escape(text.slice(0,i)) + "<mark>" + escape(text.slice(i, i+q.length)) + "</mark>" + escape(text.slice(i+q.length));
   }
   function updateSel() {
     [].forEach.call(list.children, function(c, i){
@@ -1544,7 +1662,11 @@ export function renderCommandPalette(opts: {
     if (it.href) { window.location = it.href; close(); }
   }
 
-  input.addEventListener("input", function(){ sel = 0; render(); });
+  input.addEventListener("input", function(){
+    sel = 0;
+    maybeFetchContent(input.value.trim());
+    render();
+  });
   input.addEventListener("keydown", function(e){
     if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(filtered.length - 1, sel + 1); updateSel(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); updateSel(); }

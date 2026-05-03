@@ -394,6 +394,62 @@ export default {
       });
     }
 
+    // GET /share/:wrapId/api/search?q=… — full-text search across the wrapper's
+    // note bodies. Used by the command-palette UI when the user types 3+ chars.
+    // Returns case-insensitive substring matches with ±60-char snippets.
+    const searchMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})\/api\/search$/);
+    if (searchMatch && req.method === "GET") {
+      const wrapId = searchMatch[1];
+      const q = (url.searchParams.get("q") ?? "").trim();
+      if (q.length < 2) return json({ matches: [] });
+
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return new Response("not found", { status: 404 });
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      const gate = await checkGate(env, wrap, wrapId, url);
+      if (!gate.ok) return gate.resp;
+
+      const records = await loadNotes(env.NOTES, wrap.ulids);
+      const qLower = q.toLowerCase();
+      const matches: Array<{
+        ulid: string; title: string; path: string;
+        snippet: string; matchOffset: number; bodyHits: number;
+      }> = [];
+      for (const r of records) {
+        if (!r.md) continue;
+        const titleHit = r.title.toLowerCase().includes(qLower);
+        const bodyLower = r.md.toLowerCase();
+        const idx = bodyLower.indexOf(qLower);
+        if (!titleHit && idx < 0) continue;
+
+        // For body-only matches, return a snippet centred on the first hit.
+        // For title-only matches, fall back to the start of the note.
+        const anchor = idx >= 0 ? idx : 0;
+        const start = Math.max(0, anchor - 60);
+        const end = Math.min(r.md.length, anchor + q.length + 60);
+        let snippet = r.md.slice(start, end).replace(/\s+/g, " ").trim();
+        if (start > 0) snippet = "…" + snippet;
+        if (end < r.md.length) snippet = snippet + "…";
+        // Count occurrences for ranking (capped — full count is wasteful)
+        let bodyHits = 0;
+        let scan = bodyLower.indexOf(qLower);
+        while (scan !== -1 && bodyHits < 50) {
+          bodyHits++;
+          scan = bodyLower.indexOf(qLower, scan + qLower.length);
+        }
+        matches.push({
+          ulid: r.ulid,
+          title: r.title,
+          path: r.path,
+          snippet,
+          matchOffset: anchor,
+          bodyHits: titleHit ? bodyHits + 5 : bodyHits, // title hits rank higher
+        });
+      }
+      matches.sort((a, b) => b.bodyHits - a.bodyHits);
+      return json({ matches: matches.slice(0, 30), query: q });
+    }
+
     // GET /share/:wrapId/c/:ulid — canvas scoped to a wrapper
     const scopedCanvasMatch = path.match(
       /^\/share\/([a-zA-Z0-9_-]{1,64})\/c\/([0-9A-HJKMNP-TV-Z]{26})$/
