@@ -246,6 +246,14 @@ blockquote {
   background: var(--border-faint);
   margin: 2px 4px;
 }
+@media (pointer: coarse) {
+  /* Bump touch targets to ≥40px and add space so fingers don't hit two
+     buttons at once. Triggered for any device whose primary pointer is
+     touch (phones, tablets), not by viewport width. */
+  .canvas-rail { gap: 8px; padding: 8px; }
+  .canvas-rail button { width: 40px; height: 40px; font-size: 17px; }
+  .canvas-rail .rail-divider { margin: 4px 6px; }
+}
 .canvas-rail .rail-help {
   position: relative;
 }
@@ -643,11 +651,24 @@ blockquote {
   cursor: pointer;
 }
 .sidebar-filter-hint {
-  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  font-size: .65em; color: var(--text-faint); pointer-events: none;
-  background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px;
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .65em; color: var(--text-faint);
+  background: var(--bg-secondary); padding: 2px 6px;
+  border: 1px solid var(--border-faint); border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
 }
+.sidebar-filter-hint:hover { color: var(--text-accent); border-color: var(--text-accent); }
 .sidebar-filter-input:not(:placeholder-shown) ~ .sidebar-filter-hint { display: none; }
+.sidebar-filter-hint-icon { display: none; font-size: 1.4em; line-height: 1; }
+@media (pointer: coarse) {
+  /* On touch devices the ⌘K text is meaningless — show just the magnifier
+     icon and make the whole pill a comfortable tap target. */
+  .sidebar-filter-hint { padding: 6px 10px; font-size: .8em; }
+  .sidebar-filter-hint-text { display: none; }
+  .sidebar-filter-hint-icon { display: inline; }
+}
 /* hide tree nodes filtered out — JS adds .filter-hidden during typing */
 .tree-folder.filter-hidden, .tree-file.filter-hidden { display: none !important; }
 /* highlight match within visible labels */
@@ -1280,7 +1301,10 @@ export function renderTreeSidebar(opts: {
     ${downloadLink}
     <div class="sidebar-search">
       <input type="search" id="sidebar-filter" class="sidebar-filter-input" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter files in sidebar">
-      <span class="sidebar-filter-hint" id="sidebar-filter-hint" aria-hidden="true">⌘K for full search</span>
+      <button type="button" class="sidebar-filter-hint" id="sidebar-filter-hint" aria-label="Open command palette for full content search">
+        <span class="sidebar-filter-hint-text">⌘K for full search</span>
+        <span class="sidebar-filter-hint-icon" aria-hidden="true">🔎</span>
+      </button>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-title">Files <span class="sidebar-filter-empty" id="sidebar-filter-empty" hidden>· no matches</span></div>
@@ -1502,6 +1526,14 @@ export function renderCommandPalette(opts: {
     setTimeout(function(){ input.focus(); }, 0);
   }
   function close() { palette.hidden = true; }
+
+  // Expose open() so non-keyboard callers (the sidebar's tap-to-search button
+  // on touch devices, future toolbar items, etc.) can trigger the palette.
+  window.__brainshareOpenPalette = open;
+  document.getElementById("sidebar-filter-hint")?.addEventListener("click", function(e){
+    e.preventDefault();
+    open();
+  });
   function openHelp() { if (help) help.hidden = false; }
   function closeHelp() { if (help) help.hidden = true; }
 
@@ -2352,7 +2384,35 @@ ${palette}
     renderer.refresh();
     document.body.style.cursor = "";
   });
-  renderer.on("clickNode", function(p){ window.location = "/share/" + DATA.wrapId + "/" + p.node + DATA.tokenQuery; });
+  // Touch devices have no hover, so the focus-cluster state never activates
+  // from enterNode/leaveNode. Make tap-to-focus / second-tap-to-navigate the
+  // touch behaviour, and tapping empty stage clears focus. Mouse-primary
+  // devices keep the original "click navigates immediately" flow.
+  var isTouch = (matchMedia && matchMedia("(hover: none)").matches);
+  var navigateTo = function(node){
+    window.location = "/share/" + DATA.wrapId + "/" + node + DATA.tokenQuery;
+  };
+  renderer.on("clickNode", function(p){
+    if (!isTouch) { navigateTo(p.node); return; }
+    if (hoveredNode === p.node) {
+      // second tap on the focused node → navigate
+      navigateTo(p.node);
+      return;
+    }
+    // first tap → focus this node + neighbours, just like enterNode does
+    hoveredNode = p.node;
+    hoveredNeighbors = {};
+    hoveredNeighbors[p.node] = true;
+    g.forEachNeighbor(p.node, function(nb){ hoveredNeighbors[nb] = true; });
+    renderer.refresh();
+  });
+  // On touch, tapping empty graph space clears the focus.
+  renderer.on("clickStage", function(){
+    if (!isTouch || !hoveredNode) return;
+    hoveredNode = null;
+    hoveredNeighbors = null;
+    renderer.refresh();
+  });
 })();
 </script>
 `,
