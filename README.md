@@ -206,6 +206,45 @@ python3 scripts/bulk-publish.py \
   <PUBLISHER_TOKEN>
 ```
 
+## Calling the publisher API directly
+
+⚠ **Cloudflare's bot-fight protection is enabled on `*.workers.dev` and will reject any request whose User-Agent looks scripted.** The failure is silent — you get HTTP 403 with body `error code: 1010` and *no useful detail*. The auth header is correct, the token is fine, the URL is fine; it's just the UA. This bites everyone who tries to hit the API with `curl` defaults, Python's `urllib`, `requests`, `httpx`, `node-fetch`, etc.
+
+**Set a custom User-Agent on every request.** Any non-default value works. The bundled scripts use `BrainShare-bulk-publish/0.2`.
+
+`curl` example — publish one note:
+
+```bash
+curl -X PUT \
+  "https://brainshare-publisher.<your-subdomain>.workers.dev/api/notes/01HXYZ..." \
+  -H "authorization: Bearer $PUBLISHER_TOKEN" \
+  -H "content-type: text/markdown" \
+  -H "x-note-path: My Note.md" \
+  -H "user-agent: my-uploader/1.0" \
+  --data-binary @"My Note.md"
+```
+
+`python3` example — same call:
+
+```python
+import urllib.request
+body = open("My Note.md", "rb").read()
+req = urllib.request.Request(
+    "https://brainshare-publisher.<your-subdomain>.workers.dev/api/notes/01HXYZ...",
+    data=body, method="PUT",
+    headers={
+        "authorization": f"Bearer {PUBLISHER_TOKEN}",
+        "content-type": "text/markdown",
+        "x-note-path": "My Note.md",
+        "user-agent": "my-uploader/1.0",  # ← required, or you get 403
+    },
+)
+with urllib.request.urlopen(req, timeout=30) as r:
+    print(r.status, r.read().decode())
+```
+
+If you see HTTP 403 with `error code: 1010`, the User-Agent is the first thing to check — not the token, not the URL.
+
 ## Production readiness — be honest
 
 | Area | Status |

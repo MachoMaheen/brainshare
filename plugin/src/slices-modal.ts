@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import type BrainSharePlugin from "./main";
 import type { SliceMap, SliceRecord } from "./main";
+import { FolderPickerModal } from "./folder-picker";
 
 /**
  * SlicesModal — reads .obsidian/brainshare-slices.json and shows every slice
@@ -173,6 +174,55 @@ export class SlicesModal extends Modal {
       }
     };
     renderNoteRows();
+
+    // Update actions
+    new Setting(contentEl)
+      .setName("Re-publish (refresh content)")
+      .setDesc("Re-pushes every note in this slice. Use after editing notes in Obsidian to update what recipients see at the existing share URL. Notes that have been deleted from the vault are skipped.")
+      .addButton((b) =>
+        b.setButtonText("Re-publish").setCta().onClick(async () => {
+          if (!slice.files || slice.files.length === 0) {
+            new Notice("BrainShare: this slice has no recorded file paths to re-publish");
+            return;
+          }
+          b.setDisabled(true);
+          b.setButtonText("Re-publishing…");
+          const result = await this.plugin.republishSlice(wrapId, slice);
+          if (!result) {
+            new Notice("BrainShare: re-publish failed (check console)");
+            b.setDisabled(false);
+            b.setButtonText("Re-publish");
+            return;
+          }
+          // Update sidecar with the freshly resolved file list + ULIDs
+          this.slices[wrapId] = {
+            ...slice,
+            ulids: result.ulids,
+            files: result.resolvedFiles.map((f) => f.path),
+          };
+          await this.plugin.writeSlices(this.slices);
+          const missingNote = result.missing.length ? ` (${result.missing.length} missing skipped)` : "";
+          new Notice(`BrainShare: re-published ${result.pushed} → /share/${wrapId}${missingNote}`);
+          this.renderManage(wrapId);
+        })
+      );
+
+    new Setting(contentEl)
+      .setName("Edit notes in slice")
+      .setDesc("Open the picker pre-filled with this slice's notes. Tick to add new ones, untick to remove. Same wrapId — share URL stays valid.")
+      .addButton((b) =>
+        b.setButtonText("Edit notes…").onClick(() => {
+          this.close();
+          new FolderPickerModal(this.app, this.plugin, {
+            wrapId,
+            title: slice.title,
+            description: slice.description,
+            gated: slice.gated,
+            files: slice.files ?? [],
+            created_at: slice.created_at,
+          }).open();
+        })
+      );
 
     // Destructive actions
     new Setting(contentEl)

@@ -1,6 +1,6 @@
 {
   "name": "brainshare-plugin",
-  "version": "0.1.3",
+  "version": "0.1.6",
   "private": true,
   "description": "Obsidian plugin: ULID stamper + publish current note",
   "scripts": {

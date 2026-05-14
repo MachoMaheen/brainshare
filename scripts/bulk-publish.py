@@ -7,6 +7,13 @@ Usage:  bulk-publish.py <vault-path> <publisher-url> <token>
 
 Output: prints one line per note (stamp/skip + HTTP code + relative path),
         then a JSON array of all successfully-published ULIDs.
+
+⚠ DO NOT REMOVE the `user-agent` header from any request below.
+Cloudflare's bot-fight protection on *.workers.dev rejects scripted-looking
+User-Agents (Python's default urllib UA, generic curl) with a silent HTTP 403
++ body "error code: 1010". Auth, token, and URL all look correct in that case
+— it's purely a UA filter. Any non-default UA string works; we use
+"BrainShare-bulk-publish/0.2".
 """
 import json
 import os

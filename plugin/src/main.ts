@@ -180,6 +180,152 @@ export default class BrainSharePlugin extends Plugin {
   }
 
   /**
+   * GET /api/wrappers/:id — fetch the raw wrapper JSON (auth required).
+   * Used before re-publishing to preserve fields the plugin doesn't manage
+   * (canvases, assets) that may have been written by the bulk-publish CLI.
+   *
+   * Returns a discriminated result so callers can distinguish:
+   *   - "ok"      — wrapper exists, data is its parsed JSON
+   *   - "missing" — 404, wrapper genuinely doesn't exist (sidecar is stale)
+   *   - "error"   — network / auth / parse failure; caller should NOT proceed
+   *                 with a re-PUT or it could silently wipe canvases/assets
+   */
+  async fetchWrapper(
+    wrapId: string
+  ): Promise<
+    | { kind: "ok"; data: {
+        title?: string;
+        description?: string;
+        ulids?: string[];
+        canvases?: string[];
+        assets?: Record<string, string>;
+        gated?: boolean;
+        created_at?: string;
+      } }
+    | { kind: "missing" }
+    | { kind: "error"; status: number }
+  > {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return { kind: "error", status: 0 };
+    let res;
+    try {
+      res = await requestUrl({
+        url: `${publisherUrl}/api/wrappers/${wrapId}`,
+        method: "GET",
+        headers: { authorization: `Bearer ${publisherToken}` },
+        throw: false,
+      });
+    } catch {
+      return { kind: "error", status: 0 };
+    }
+    if (res.status === 404) return { kind: "missing" };
+    if (res.status >= 400) return { kind: "error", status: res.status };
+    try {
+      return { kind: "ok", data: res.json };
+    } catch {
+      return { kind: "error", status: res.status };
+    }
+  }
+
+  /**
+   * PUT /api/wrappers/:id — create or overwrite the wrapper definition. The
+   * worker is fully idempotent on PUT, so the same wrapId can be re-pushed to
+   * update its title / description / note set / gated flag without changing
+   * the share URL. Pass `canvases` / `assets` to preserve fields written by
+   * the bulk-publish CLI; omit them for plugin-only slices. Returns true on
+   * success.
+   */
+  async publishWrapper(
+    wrapId: string,
+    opts: {
+      title: string;
+      description: string;
+      ulids: string[];
+      gated: boolean;
+      created_at?: string;
+      canvases?: string[];
+      assets?: Record<string, string>;
+    }
+  ): Promise<boolean> {
+    const { publisherUrl, publisherToken } = this.settings;
+    if (!publisherUrl || !publisherToken) return false;
+    const body: Record<string, unknown> = {
+      title: opts.title,
+      description: opts.description,
+      ulids: opts.ulids,
+      gated: opts.gated,
+      created_at: opts.created_at ?? new Date().toISOString(),
+    };
+    if (opts.canvases !== undefined) body.canvases = opts.canvases;
+    if (opts.assets !== undefined) body.assets = opts.assets;
+    const res = await requestUrl({
+      url: `${publisherUrl}/api/wrappers/${wrapId}`,
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${publisherToken}`,
+      },
+      body: JSON.stringify(body),
+      throw: false,
+    });
+    return res.status < 400;
+  }
+
+  /**
+   * Re-push every note recorded in `slice.files` (refreshing content for any
+   * that changed since first publish) and overwrite the wrapper with the
+   * resulting ULID list. Same wrapId — same /share/<id> URL stays valid for
+   * existing recipients. Files no longer in the vault are skipped and
+   * reported.
+   *
+   * Before PUTing the wrapper we GET its current JSON so we can forward
+   * `canvases` / `assets` unchanged. The plugin's folder-picker only
+   * publishes notes, so without this round-trip we'd silently wipe canvases /
+   * assets on any slice originally created via scripts/bulk-publish-full.py.
+   */
+  async republishSlice(
+    wrapId: string,
+    slice: SliceRecord
+  ): Promise<{ pushed: number; missing: string[]; ulids: string[]; resolvedFiles: TFile[] } | null> {
+    const files: TFile[] = [];
+    const missing: string[] = [];
+    for (const path of slice.files ?? []) {
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (f instanceof TFile && f.extension === "md") files.push(f);
+      else missing.push(path);
+    }
+    const ulids: string[] = [];
+    for (const f of files) {
+      try {
+        const u = await this.publishNoteSilent(f);
+        if (u) ulids.push(u);
+      } catch (e) {
+        console.warn("BrainShare: republish failed to push", f.path, e);
+      }
+    }
+    if (ulids.length === 0) return null;
+    const existing = await this.fetchWrapper(wrapId);
+    if (existing.kind === "error") {
+      // Refuse to PUT — we can't tell if the wrapper has canvases/assets we
+      // need to preserve, and a blind PUT would silently wipe them.
+      console.warn(`BrainShare: cannot fetch wrapper ${wrapId} (status=${existing.status}); aborting re-publish to avoid wiping canvases/assets`);
+      return null;
+    }
+    const carry = existing.kind === "ok" ? existing.data : null;
+    const ok = await this.publishWrapper(wrapId, {
+      title: slice.title,
+      description: slice.description,
+      ulids,
+      gated: slice.gated,
+      created_at: slice.created_at,
+      canvases: carry?.canvases,
+      assets: carry?.assets,
+    });
+    if (!ok) return null;
+    return { pushed: ulids.length, missing, ulids, resolvedFiles: files };
+  }
+
+  /**
    * Mint a JWT for a gated wrapper. Returns the token bundle (jti + jwt + url + exp)
    * or null on failure. Caller decides how to surface results.
    */

@@ -2464,6 +2464,7 @@ export function renderTreeSidebar(opts: {
       <input type="search" id="sidebar-filter" class="sidebar-filter-input" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter files in sidebar">
       <button type="button" class="sidebar-filter-hint" id="sidebar-filter-hint" aria-label="Open command palette for full content search">
         <span class="sidebar-filter-hint-text">⌘K for full search</span>
+        <span class="sidebar-filter-hint-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" width="14" height="14"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14" stroke-linecap="round"/></svg></span>
       </button>
     </div>
     <div class="sidebar-section">

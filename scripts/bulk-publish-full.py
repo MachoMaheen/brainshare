@@ -14,6 +14,13 @@ Output:
 The wrapper PUT body should set ulids = NOTE_ULIDS, canvases = CANVAS_ULIDS,
 assets = ASSETS, so the worker's renderNote can resolve image embeds and
 the wrapper landing can list canvases.
+
+⚠ DO NOT REMOVE the `user-agent` header from any request below.
+Cloudflare's bot-fight protection on *.workers.dev rejects scripted-looking
+User-Agents (Python's default urllib UA, generic curl) with a silent HTTP 403
++ body "error code: 1010". Auth, token, and URL all look correct in that case
+— it's purely a UA filter. Any non-default UA string works; we use
+"BrainShare-bulk-publish/0.2".
 """
 import hashlib
 import json

@@ -1,12 +1,31 @@
-import { App, Modal, Notice, Setting, TFile, TFolder, requestUrl } from "obsidian";
+import { App, Modal, Notice, Setting, TFile, TFolder } from "obsidian";
 import type BrainSharePlugin from "./main";
 import { MintTokenModal } from "./mint-modal";
+
+/**
+ * Optional context for opening the picker in "update existing slice" mode:
+ * pre-fills wrapId / title / description / gated, pre-ticks the files that
+ * are currently in the slice, and disables the wrapper-name field so the
+ * share URL stays the same.
+ */
+export interface ExistingSliceContext {
+  wrapId: string;
+  title: string;
+  description: string;
+  gated: boolean;
+  files: string[];
+  created_at?: string;
+}
 
 /**
  * FolderPickerModal — vault tree (folders + .md notes) with per-file checkboxes.
  * Folder checkboxes cascade to descendant notes; individual notes can still be
  * unticked after selecting a parent. On Publish, every selected note gets ULID-
  * stamped + pushed, and all returned ULIDs are bundled into one wrapper share URL.
+ *
+ * Pass `existingSlice` to open in update mode: the wrapId is locked, the title /
+ * description / gated flag are pre-filled, and the slice's existing files are
+ * pre-ticked so the user only has to add or remove notes.
  */
 export class FolderPickerModal extends Modal {
   private plugin: BrainSharePlugin;
@@ -15,6 +34,7 @@ export class FolderPickerModal extends Modal {
   private wrapperTitle = "Selected slice";
   private wrapperDescription = "";
   private gated = false;
+  private existingSlice: ExistingSliceContext | null = null;
 
   // path → checkbox refs so toggling at any level can sync the rest of the tree
   private fileBoxes = new Map<string, HTMLInputElement>();
@@ -25,17 +45,28 @@ export class FolderPickerModal extends Modal {
   private countEl: HTMLElement | null = null;
   private publishBtn: HTMLButtonElement | null = null;
 
-  constructor(app: App, plugin: BrainSharePlugin) {
+  constructor(app: App, plugin: BrainSharePlugin, existingSlice?: ExistingSliceContext) {
     super(app);
     this.plugin = plugin;
+    if (existingSlice) {
+      this.existingSlice = existingSlice;
+      this.wrapperName = existingSlice.wrapId;
+      this.wrapperTitle = existingSlice.title || "Selected slice";
+      this.wrapperDescription = existingSlice.description || "";
+      this.gated = existingSlice.gated;
+      for (const path of existingSlice.files) this.selectedFiles.add(path);
+    }
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Publish slice" });
+    const isUpdate = !!this.existingSlice;
+    contentEl.createEl("h2", { text: isUpdate ? `Update slice: ${this.existingSlice!.wrapId}` : "Publish slice" });
     contentEl.createEl("p", {
-      text: "Pick the folders and notes to share. Folder checkboxes select everything inside, but you can untick individual notes to opt them out.",
+      text: isUpdate
+        ? "Tick to add notes to the slice, untick to remove them. The share URL stays the same — anyone with the existing link will see the new note set after you click Update."
+        : "Pick the folders and notes to share. Folder checkboxes select everything inside, but you can untick individual notes to opt them out.",
       cls: "setting-item-description",
     });
 
@@ -51,6 +82,27 @@ export class FolderPickerModal extends Modal {
 
     const root = this.app.vault.getRoot();
     this.renderTree(root, treeEl, 0);
+
+    // Apply pre-ticked state for update mode (the renderer doesn't know about
+    // selectedFiles when building checkboxes, so sync them here)
+    if (isUpdate) {
+      let missing = 0;
+      for (const path of this.selectedFiles) {
+        const cb = this.fileBoxes.get(path);
+        if (cb) cb.checked = true;
+        else missing++;
+      }
+      this.recomputeFolderStates();
+      if (missing > 0) {
+        const warn = contentEl.createDiv();
+        warn.style.fontSize = "0.82em";
+        warn.style.color = "var(--text-warning)";
+        warn.style.margin = "0 0 8px";
+        warn.setText(
+          `⚠ ${missing} note(s) in the original slice are no longer in this vault and will be dropped from the wrapper unless you re-tick them.`
+        );
+      }
+    }
 
     // Live count
     this.countEl = contentEl.createDiv();
@@ -71,15 +123,22 @@ export class FolderPickerModal extends Modal {
       .addText((t) =>
         t
           .setPlaceholder("optional")
+          .setValue(this.wrapperDescription)
           .onChange((v) => (this.wrapperDescription = v))
       );
 
     new Setting(contentEl)
       .setName("Wrapper name")
-      .setDesc("Leave blank for an auto-generated short id")
-      .addText((t) =>
-        t.setPlaceholder("e.g. agent-os-q2").onChange((v) => (this.wrapperName = v.trim()))
-      );
+      .setDesc(isUpdate
+        ? "Locked — updating an existing slice keeps the same share URL"
+        : "Leave blank for an auto-generated short id"
+      )
+      .addText((t) => {
+        t.setPlaceholder("e.g. agent-os-q2")
+          .setValue(this.wrapperName)
+          .onChange((v) => (this.wrapperName = v.trim()));
+        if (isUpdate) t.setDisabled(true);
+      });
 
     new Setting(contentEl)
       .setName("Gated")
@@ -95,7 +154,7 @@ export class FolderPickerModal extends Modal {
 
     new Setting(contentEl).addButton((b) => {
       this.publishBtn = b
-        .setButtonText("Publish")
+        .setButtonText(isUpdate ? "Update" : "Publish")
         .setCta()
         .onClick(() => this.publish())
         .buttonEl;
@@ -295,33 +354,41 @@ export class FolderPickerModal extends Modal {
       return;
     }
 
+    const isUpdate = !!this.existingSlice;
     const wrapId = this.wrapperName || Math.random().toString(36).slice(2, 10);
     this.setStatus(`Bundling ${ulids.length} note(s) into wrapper ${wrapId}…`);
+    // For updates, preserve any canvases/assets the wrapper already has —
+    // the picker only knows about .md files, so re-PUTing without these
+    // would silently wipe slices that were originally bulk-published.
+    let carry: { canvases?: string[]; assets?: Record<string, string> } | null = null;
+    if (isUpdate) {
+      const existing = await this.plugin.fetchWrapper(wrapId);
+      if (existing.kind === "error") {
+        new Notice(`BrainShare: cannot fetch existing wrapper (status=${existing.status}). Aborted to avoid wiping canvases/assets — try again or check connectivity.`);
+        if (this.publishBtn) this.publishBtn.disabled = false;
+        return;
+      }
+      carry = existing.kind === "ok" ? existing.data : null;
+    }
     try {
-      const res = await requestUrl({
-        url: `${publisherUrl}/api/wrappers/${wrapId}`,
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${publisherToken}`,
-        },
-        body: JSON.stringify({
-          title: this.wrapperTitle,
-          description: this.wrapperDescription,
-          ulids,
-          gated: this.gated,
-          created_at: new Date().toISOString(),
-        }),
-        throw: false,
+      const ok = await this.plugin.publishWrapper(wrapId, {
+        title: this.wrapperTitle,
+        description: this.wrapperDescription,
+        ulids,
+        gated: this.gated,
+        created_at: this.existingSlice?.created_at,
+        canvases: carry?.canvases,
+        assets: carry?.assets,
       });
-      if (res.status >= 400) {
-        new Notice(`BrainShare: wrapper PUT failed (${res.status})`);
+      if (!ok) {
+        new Notice(`BrainShare: wrapper PUT failed`);
         if (this.publishBtn) this.publishBtn.disabled = false;
         return;
       }
       const wrapUrl = `${publisherUrl}/share/${wrapId}`;
       const failNote = failed.length ? ` (${failed.length} failed)` : "";
-      new Notice(`BrainShare: published ${ulids.length}/${files.length} → ${wrapUrl}${failNote}`);
+      const verb = isUpdate ? "updated" : "published";
+      new Notice(`BrainShare: ${verb} ${ulids.length}/${files.length} → ${wrapUrl}${failNote}`);
       try {
         await navigator.clipboard.writeText(wrapUrl);
       } catch {
@@ -346,7 +413,8 @@ export class FolderPickerModal extends Modal {
       this.close();
 
       // Gated wrappers need a token to view — pop the mint modal pre-filled
-      if (this.gated) {
+      // (skip on update; existing recipients already have tokens)
+      if (this.gated && !isUpdate) {
         new MintTokenModal(this.app, this.plugin, wrapId).open();
       }
     } catch (e) {
