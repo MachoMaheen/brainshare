@@ -3,10 +3,13 @@ import {
   renderWrapper,
   renderGateError,
   renderCanvas,
+  renderOgCard,
   buildShareSet,
   loadNotes,
   loadNotesMeta,
   loadCanvasMeta,
+  buildBacklinks,
+  folderSiblings,
   NoteMeta,
   WrapData,
 } from "./render";
@@ -309,12 +312,17 @@ export default {
       return json({ jti: body.jti, revoked: true });
     }
 
-    // PUT /api/wrappers/:id — store wrapper (auth required)
+    // GET/PUT/DELETE /api/wrappers/:id — read/write/delete wrapper (auth required)
     const wrapMatch = path.match(/^\/api\/wrappers\/([a-zA-Z0-9_-]{1,64})$/);
     if (wrapMatch) {
       if (unauthorized(env, req)) return forbidden();
       if (req.method === "PUT" && !(await rateLimitOk(env, req, "wrap", 60, 60))) return rateLimited(60);
       const id = wrapMatch[1];
+      if (req.method === "GET") {
+        const raw = await env.NOTES.get(`wrap:${id}`);
+        if (!raw) return new Response("wrapper not found", { status: 404 });
+        return new Response(raw, { headers: { "content-type": "application/json" } });
+      }
       if (req.method === "PUT") {
         const body = await req.text();
         let parsed: WrapData;
@@ -425,11 +433,30 @@ export default {
         // For body-only matches, return a snippet centred on the first hit.
         // For title-only matches, fall back to the start of the note.
         const anchor = idx >= 0 ? idx : 0;
-        const start = Math.max(0, anchor - 60);
-        const end = Math.min(r.md.length, anchor + q.length + 60);
-        let snippet = r.md.slice(start, end).replace(/\s+/g, " ").trim();
-        if (start > 0) snippet = "…" + snippet;
-        if (end < r.md.length) snippet = snippet + "…";
+        // Strip YAML frontmatter so snippets never start with "--- title: ..."
+        const mdBody = r.md.replace(/^---[\s\S]*?\n---\s*\n/, "");
+        const bodyLowerClean = mdBody.toLowerCase();
+        const idxClean = bodyLowerClean.indexOf(qLower);
+        const anchorClean = idxClean >= 0 ? idxClean : 0;
+        let startClean = Math.max(0, anchorClean - 120);
+        let endClean = Math.min(mdBody.length, anchorClean + q.length + 120);
+        // Strip frontmatter from snippet if anchor is past it
+        const fmMatch = r.md.match(/^---[\s\S]*?\n---\s*\n/);
+        const bodyStart = fmMatch ? fmMatch[0].length : 0;
+        if (startClean < bodyStart && anchorClean >= bodyStart) startClean = bodyStart;
+        // Snap start/end to word boundaries (avoid mid-word cuts)
+        if (startClean > 0) {
+          const wordStart = mdBody.slice(startClean, anchorClean).search(/\s/);
+          if (wordStart >= 0 && wordStart < 30) startClean = startClean + wordStart + 1;
+        }
+        if (endClean < mdBody.length) {
+          const tail = mdBody.slice(anchorClean + q.length, endClean);
+          const lastSpace = tail.lastIndexOf(' ');
+          if (lastSpace > tail.length - 30) endClean = anchorClean + q.length + lastSpace;
+        }
+        let snippet = mdBody.slice(startClean, endClean).replace(/\s+/g, " ").trim();
+        if (startClean > 0) snippet = "…" + snippet;
+        if (endClean < mdBody.length) snippet = snippet + "…";
         // Count occurrences for ranking (capped — full count is wasteful)
         let bodyHits = 0;
         let scan = bodyLower.indexOf(qLower);
@@ -448,6 +475,123 @@ export default {
       }
       matches.sort((a, b) => b.bodyHits - a.bodyHits);
       return json({ matches: matches.slice(0, 30), query: q });
+    }
+
+    // GET /share/:wrapId/:ulid/og.svg — OpenGraph card for social previews.
+    // Same gate as the note itself; for a gated share, the og.svg requires the
+    // JWT (passed through as ?t=...). Unauthorized → 403. The note URL embeds
+    // <meta property="og:image"> pointing here, so Slack/Discord/Mastodon/etc.
+    // unfurl gated shares for recipients who have the link and silently skip
+    // for everyone else.
+    const ogMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})\/([0-9A-HJKMNP-TV-Z]{26})\/og\.svg$/);
+    if (ogMatch && req.method === "GET") {
+      const [, wrapId, ulid] = ogMatch;
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return new Response("wrapper not found", { status: 404 });
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      if (!wrap.ulids.includes(ulid)) return new Response("note not in this share", { status: 403 });
+      const gate = await checkGate(env, wrap, wrapId, url);
+      if (!gate.ok) return gate.resp;
+
+      const [md, meta] = await Promise.all([
+        env.NOTES.get(`note:${ulid}`),
+        env.NOTES.get(`meta:${ulid}`),
+      ]);
+      if (!md) return new Response("note not yet published", { status: 404 });
+      let basename = ulid, fullPath = "";
+      if (meta) {
+        try { const m = JSON.parse(meta) as NoteMeta; basename = m.basename || ulid; fullPath = m.path || ""; } catch {}
+      }
+      // Title resolution mirrors renderNote: body H1 → frontmatter → basename
+      const bodyH1Match = md.match(/^---[\s\S]*?\n---\s*\n\s*#\s+(.+?)\s*$/m) ?? md.match(/^\s*#\s+(.+?)\s*$/m);
+      const title = (bodyH1Match ? bodyH1Match[1].trim() : "") || basename;
+      const folder = fullPath.includes("/") ? fullPath.split("/").slice(0, -1).join("/") : "";
+      // Strip frontmatter, count words
+      const body = md.replace(/^---[\s\S]*?\n---\s*\n/, "");
+      const wordCount = (body.match(/\b\w+\b/g) ?? []).length;
+
+      const svg = renderOgCard({
+        title,
+        wrapTitle: wrap.title ?? "",
+        folder,
+        wordCount,
+        gated: wrap.gated,
+      });
+      return new Response(svg, {
+        headers: {
+          "content-type": "image/svg+xml; charset=utf-8",
+          "cache-control": "public, max-age=300, s-maxage=300",
+        },
+      });
+    }
+
+    /** Decode the creation timestamp embedded in a ULID. Returns ISO-8601 string. */
+    function ulidToIso(ulid: string): string {
+      const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      const ts10 = ulid.slice(0, 10).toUpperCase();
+      let ms = 0;
+      for (let i = 0; i < ts10.length; i++) {
+        ms = ms * 32 + CROCKFORD.indexOf(ts10[i]);
+      }
+      return new Date(ms).toISOString();
+    }
+
+    // GET /share/:wrapId/feed.xml — Atom feed of the latest-updated notes in
+    // the share. Gated under the same JWT as the rest of the wrapper, so the
+    // viewer can subscribe in their feed reader without ever logging in.
+    const feedMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})\/feed\.xml$/);
+    if (feedMatch && req.method === "GET") {
+      const wrapId = feedMatch[1];
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return new Response("wrapper not found", { status: 404 });
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      const gate = await checkGate(env, wrap, wrapId, url);
+      if (!gate.ok) return gate.resp;
+
+      const records = await loadNotes(env.NOTES, wrap.ulids);
+      const shareBase = `${origin}/share/${wrapId}`;
+      const tq = gate.tokenQuery;
+      // ULIDs are time-sortable (Crockford base32 of unix ms), so reverse-sort
+      // gives newest-first. Best we can do without per-note updated_at fields.
+      const sorted = [...records].sort((a, b) => b.ulid.localeCompare(a.ulid));
+      const updated = wrap.created_at || new Date().toISOString();
+
+      const xmlEscape = (s: string) => s
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+      const entries = sorted.slice(0, 20).map((r) => {
+        if (!r.md) return "";
+        const body = r.md.replace(/^---[\s\S]*?\n---\s*\n/, "").trim();
+        const summary = body.slice(0, 400).replace(/\s+/g, " ");
+        const entryUpdated = ulidToIso(r.ulid);
+        return `  <entry>
+    <title>${xmlEscape(r.title)}</title>
+    <link href="${xmlEscape(shareBase + "/" + r.ulid + tq)}"/>
+    <id>tag:brainshare,${entryUpdated.slice(0, 10)}:${r.ulid}</id>
+    <updated>${xmlEscape(entryUpdated)}</updated>
+    <summary>${xmlEscape(summary)}${body.length > 400 ? "…" : ""}</summary>
+  </entry>`;
+      }).filter(Boolean).join("\n");
+
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>${xmlEscape(wrap.title ?? "BrainShare slice")}</title>
+  <subtitle>${xmlEscape(wrap.description ?? "")}</subtitle>
+  <author><name>${xmlEscape(wrap.title ?? "BrainShare")}</name></author>
+  <link href="${xmlEscape(shareBase + tq)}" rel="alternate"/>
+  <link href="${xmlEscape(shareBase + "/feed.xml" + tq)}" rel="self"/>
+  <id>tag:brainshare,${updated.slice(0, 10)}:${wrapId}</id>
+  <updated>${xmlEscape(updated)}</updated>
+${entries}
+</feed>
+`;
+      return new Response(xml, {
+        headers: {
+          "content-type": "application/atom+xml; charset=utf-8",
+          "cache-control": "public, max-age=600, s-maxage=600",
+        },
+      });
     }
 
     // GET /share/:wrapId/c/:ulid — canvas scoped to a wrapper
@@ -503,22 +647,38 @@ export default {
       const gate = await checkGate(env, wrap, wrapId, url);
       if (!gate.ok) return gate.resp;
 
-      const [md, notePath, shareSet, canvasSet, treeNotes, treeCanvases] = await Promise.all([
-        env.NOTES.get(`note:${ulid}`),
-        getNotePath(env.NOTES, ulid),
-        buildShareSet(env.NOTES, wrap.ulids),
+      // Load full note records (incl. markdown bodies) for the whole share so
+      // we can compute backlinks + folder-nav in one pass. This is ~N extra KV
+      // reads per page view (one per note in the wrapper). Acceptable in the
+      // alpha; if/when read budget becomes a concern, precompute a
+      // backlinks:<wrapId> KV index at wrap-PUT time instead.
+      const [allRecords, canvasSet, treeCanvases] = await Promise.all([
+        loadNotes(env.NOTES, wrap.ulids),
         buildCanvasSet(env.NOTES, wrap.canvases ?? []),
-        loadNotesMeta(env.NOTES, wrap.ulids),
         loadCanvasMeta(env.NOTES, wrap.canvases ?? []),
       ]);
-      if (!md) return html("<h1>404</h1><p>note not yet published</p>", 404);
+      const current = allRecords.find((r) => r.ulid === ulid);
+      if (!current || !current.md) return html("<h1>404</h1><p>note not yet published</p>", 404);
+      // ?raw=1 returns the source markdown — used by the "Copy as Markdown"
+      // button in the note action row and any agent that wants the body
+      // verbatim. Token still required (raw is INSIDE the gate check above).
+      if (url.searchParams.get("raw") === "1") {
+        return new Response(current.md, { headers: { "content-type": "text/markdown; charset=utf-8" } });
+      }
+      const shareSet = new Map(allRecords.map((r) => [r.basename, r.ulid]));
+      const backlinksMap = buildBacklinks(allRecords);
+      const treeNotes = allRecords.map(({ ulid, basename, path, title }) => ({ ulid, basename, path, title }));
+      const folderNav = folderSiblings(
+        { ulid: current.ulid, path: current.path },
+        allRecords,
+      );
       const shareBase = `${origin}/share/${wrapId}`;
-      return html(renderNote(md, ulid, {
+      return html(renderNote(current.md, ulid, {
         shareBase,
         shareSet,
         canvasSet,
         assets: wrap.assets,
-        path: notePath,
+        path: current.path,
         tokenQuery: gate.tokenQuery,
         gated: wrap.gated,
         wrapTree: {
@@ -528,6 +688,10 @@ export default {
           canvases: treeCanvases,
           assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
         },
+        backlinks: (backlinksMap.get(ulid) ?? []).map((b) => ({
+          ulid: b.ulid, title: b.title, path: b.path,
+        })),
+        folderNav,
       }));
     }
 
@@ -583,8 +747,8 @@ export default {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BrainShare — publish slices of your Obsidian vault, free</title>
-<meta name="description" content="Open-source publisher for Obsidian. Pick notes + canvases, get a shareable URL with full-text search, JWT-gated access, and an interactive graph. Runs on Cloudflare's free tier.">
+<title>BrainShare — lend your brain. Anyone can read it. Anything can call it.</title>
+<meta name="description" content="Lend your second brain. Pick notes and canvases from your Obsidian vault, get a URL with an interactive graph, full-text search, and per-recipient JWT access — readable by humans, queryable by agents. Free. Open source. No vendor lock-in.">
 <style>
 :root {
   --bg: #ffffff;
@@ -651,8 +815,17 @@ h1 {
   font-weight: 700;
   line-height: 1.05;
 }
+.tagline-emphatic {
+  font-size: clamp(1.15em, 2.4vw, 1.55em);
+  color: var(--text);
+  margin: 0 auto .9em;
+  max-width: 38em;
+  font-weight: 500;
+  letter-spacing: -.005em;
+}
+.tagline-emphatic .accent { color: var(--accent); }
 .tagline {
-  font-size: clamp(1.05em, 2vw, 1.25em);
+  font-size: clamp(1em, 1.9vw, 1.15em);
   color: var(--text-2);
   margin: 0 auto 2em;
   max-width: 38em;
@@ -756,8 +929,9 @@ details.api-ref code { background: var(--code-bg); padding: 1px 6px; border-radi
 <header class="hero">
   <div class="wrap">
     <div class="brand"><span class="brand-dot"></span>BrainShare · open source · MIT</div>
-    <h1>Publish slices of your Obsidian vault — for real.</h1>
-    <p class="tagline">Pick notes and canvases. Get a shareable URL with an interactive graph, full-text search, and per-recipient JWT access. No accounts. No vendor lock-in. Free.</p>
+    <h1>Lend your brain.</h1>
+    <p class="tagline-emphatic"><span class="accent">Anyone</span> can read it. <span class="accent">Anything</span> can call it.</p>
+    <p class="tagline">Pick notes and canvases from your Obsidian vault. Get a URL with an interactive graph, full-text search, and per-recipient JWT access — readable by humans, queryable by agents. Free. No vendor lock-in.</p>
     <div class="ctas">
       ${ctaPrimary}
       <a class="cta cta-secondary" href="${repoUrl}">View on GitHub</a>
@@ -770,32 +944,32 @@ details.api-ref code { background: var(--code-bg); padding: 1px 6px; border-radi
     <h2>What you get when you share a slice</h2>
     <div class="feature-grid">
       <div class="feature">
-        <div class="feature-icon">🕸</div>
+        <div class="feature-icon"></div>
         <h3>Interactive graph view</h3>
         <p>Sigma.js force-directed graph that mirrors your Obsidian graph view — hover to focus a cluster, click to open.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🔎</div>
+        <div class="feature-icon"></div>
         <h3>Full-text + filename search</h3>
         <p>⌘K palette searches every note body in the slice. Sidebar filter narrows the file tree as you type.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🔒</div>
+        <div class="feature-icon"></div>
         <h3>Per-recipient JWT auth</h3>
         <p>Mint a token per viewer. Expirable, revocable, optional view-count cap. No login screens.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🗺</div>
+        <div class="feature-icon"></div>
         <h3>Canvases render natively</h3>
         <p>Colors, groups, bezier edges, file embeds — Obsidian's <code>.canvas</code> spec, faithfully.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🔗</div>
+        <div class="feature-icon"></div>
         <h3>Wikilinks resolve correctly</h3>
-        <p>Links inside the share-set work. Targets outside become greyed-out "🔒 not in this share" labels — no leaks.</p>
+        <p>Links inside the share-set work. Targets outside become greyed-out "not in this share" labels — no leaks.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">⚡</div>
+        <div class="feature-icon"></div>
         <h3>Cloudflare free tier</h3>
         <p>Worker + KV. ~1000 publishes/day before you pay anything. Globally cached reads.</p>
       </div>
@@ -861,6 +1035,342 @@ wrangler deploy</pre>
 </html>`);
     }
 
-    return new Response("not found", { status: 404 });
+    // ── Company Brain waitlist ──────────────────────────────────────────
+    // Captures interest for the paid team/AI-native version of BrainShare.
+    // Storage: KV key `waitlist:cb:<lowercased-email>` → JSON {email, ts, source}.
+    // Idempotent — re-submitting the same email is a no-op.
+
+    if (path === "/company-brain" && req.method === "GET") {
+      return html(renderCompanyBrainLanding(), 200);
+    }
+
+    if (path === "/company-brain/thanks" && req.method === "GET") {
+      return html(renderCompanyBrainThanks(), 200);
+    }
+
+    if (path === "/api/company-brain-waitlist" && req.method === "POST") {
+      // Rate limit: 5 submissions per IP per hour
+      if (!(await rateLimitOk(env, req, "cbwaitlist", 5, 3600))) {
+        return rateLimited(3600);
+      }
+      let body: { email?: string; source?: string };
+      try { body = await req.json(); } catch { return new Response("invalid JSON", { status: 400 }); }
+      const email = (body.email ?? "").trim().toLowerCase();
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 200) {
+        return new Response(JSON.stringify({ ok: false, error: "invalid email" }), {
+          status: 400, headers: { "content-type": "application/json" },
+        });
+      }
+      const key = `waitlist:cb:${email}`;
+      const existing = await env.NOTES.get(key);
+      const payload = JSON.stringify({
+        email,
+        ts: new Date().toISOString(),
+        source: (body.source ?? "company-brain-landing").slice(0, 80),
+        existed: !!existing,
+      });
+      // Store with no TTL so the waitlist persists; idempotent overwrite is fine
+      await env.NOTES.put(key, payload);
+      return new Response(JSON.stringify({ ok: true, alreadyOnList: !!existing }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }
+
+    return html(`
+<main class="container" style="text-align:center;padding:6em 1em;">
+  <div style="font-size:3em;margin-bottom:.5em"></div>
+  <h1 style="font-size:1.8em;margin-bottom:.5em">Page not found</h1>
+  <p style="color:var(--text-muted,#888);margin-bottom:2em">
+    This note may have been renamed, moved, or removed from the slice.
+  </p>
+  <a href="/" style="display:inline-block;padding:.6em 1.4em;background:var(--text-accent,#7f6df2);color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+    ← Back to BrainShare
+  </a>
+</main>`, 404);
   },
 };
+
+function renderCompanyBrainLanding(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Company Brain — Coming Q3 2026</title>
+<meta property="og:title" content="Company Brain — Your team's collective brain, queryable by any agent">
+<meta property="og:description" content="MCP-native knowledge layer for teams. Built on the BrainShare protocol. Coming Q3 2026.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --bg-2: #131318;
+    --text: #ecedee;
+    --text-2: #9ca0a8;
+    --muted: #5d626c;
+    --accent: #a882ff;
+    --accent-2: #7f6df2;
+    --border: #25272f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    line-height: 1.6;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(168,130,255,.18), transparent 40%),
+      radial-gradient(circle at 85% 70%, rgba(127,109,242,.12), transparent 45%);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 5em 1.5em 4em; }
+  .nav-back {
+    display: inline-flex; align-items: center; gap: .35em;
+    color: var(--text-2); text-decoration: none; font-size: .9em;
+    margin-bottom: 3em;
+  }
+  .nav-back:hover { color: var(--text); }
+  .eyebrow {
+    display: inline-block;
+    padding: .35em .8em;
+    background: rgba(168,130,255,.13);
+    border: 1px solid rgba(168,130,255,.3);
+    border-radius: 999px;
+    font-size: .78em;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 1.2em;
+  }
+  h1 {
+    font-size: 3.2em;
+    font-weight: 700;
+    letter-spacing: -.03em;
+    line-height: 1.05;
+    margin: 0 0 .35em;
+    background: linear-gradient(135deg, #fff 0%, #a882ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .lede {
+    font-size: 1.35em;
+    line-height: 1.45;
+    color: var(--text-2);
+    margin: 0 0 2.2em;
+    max-width: 38ch;
+  }
+  .pitch { margin: 0 0 2.5em; }
+  .pitch p { font-size: 1.02em; color: var(--text-2); margin: 0 0 1em; }
+  .pitch strong { color: var(--text); font-weight: 600; }
+  .features {
+    list-style: none; padding: 0; margin: 0 0 2.8em;
+    display: grid; grid-template-columns: 1fr 1fr; gap: .7em 1.4em;
+  }
+  .features li {
+    display: flex; align-items: flex-start; gap: .55em;
+    color: var(--text-2); font-size: .95em;
+  }
+  .features li::before {
+    content: "▸"; color: var(--accent); flex: 0 0 auto;
+  }
+  .form {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.8em;
+    margin: 0 0 2em;
+  }
+  .form-label {
+    display: block;
+    font-size: .82em;
+    color: var(--text-2);
+    margin-bottom: .65em;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .form-row { display: flex; gap: .55em; }
+  .form input[type=email] {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .8em 1em;
+    font-size: 1em;
+    font-family: inherit;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .form input[type=email]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(168,130,255,.2);
+  }
+  .form button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: .8em 1.4em;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .15s, transform .1s;
+  }
+  .form button:hover { background: var(--accent-2); transform: translateY(-1px); }
+  .form button:disabled { opacity: .5; cursor: not-allowed; }
+  .form-hint {
+    font-size: .82em;
+    color: var(--muted);
+    margin-top: .8em;
+  }
+  .form-msg {
+    margin-top: 1em;
+    padding: .7em 1em;
+    border-radius: 8px;
+    font-size: .9em;
+    display: none;
+  }
+  .form-msg.success {
+    display: block;
+    background: rgba(80,200,120,.14);
+    border: 1px solid rgba(80,200,120,.3);
+    color: #7adba0;
+  }
+  .form-msg.error {
+    display: block;
+    background: rgba(255,80,80,.12);
+    border: 1px solid rgba(255,80,80,.3);
+    color: #ff8a8a;
+  }
+  .signature {
+    margin-top: 2.5em;
+    padding-top: 2em;
+    border-top: 1px solid var(--border);
+    font-size: .88em;
+    color: var(--muted);
+  }
+  .signature a { color: var(--text-2); }
+  @media (max-width: 600px) {
+    h1 { font-size: 2.3em; }
+    .lede { font-size: 1.1em; }
+    .features { grid-template-columns: 1fr; }
+    .form-row { flex-direction: column; }
+    .form button { width: 100%; padding: .9em; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <a class="nav-back" href="/">← BrainShare</a>
+
+  <div class="eyebrow">▸ Q3 2026 · Early access</div>
+  <h1>Company Brain.</h1>
+  <p class="lede">Your team's collective second brain — readable by every agent you ship.</p>
+
+  <div class="pitch">
+    <p>BrainShare lets <strong>one person</strong> publish a vault. Company Brain lets <strong>your whole team</strong> publish a single, shared, AI-native brain — and exposes it to every Claude, Cursor, and custom agent in your stack via the Model Context Protocol.</p>
+    <p>Same publishing protocol. Multi-tenant. Auth that works for teams. And the knowledge graph becomes infrastructure — not a tool you visit, a system every agent already knows.</p>
+  </div>
+
+  <ul class="features">
+    <li>Multi-tenant teams + SSO</li>
+    <li>MCP server endpoint per workspace</li>
+    <li>Semantic search across the team brain</li>
+    <li>AI-generated summaries + linking</li>
+    <li>Slack + Notion + Linear sync</li>
+    <li>Activity analytics + most-referenced</li>
+    <li>Per-workspace agent permissions</li>
+    <li>Self-hostable on Cloudflare</li>
+  </ul>
+
+  <form class="form" id="waitlist-form" novalidate>
+    <label class="form-label" for="email">Join the waitlist</label>
+    <div class="form-row">
+      <input type="email" id="email" name="email" required placeholder="you@team.com" autocomplete="email">
+      <button type="submit" id="submit-btn">Request access →</button>
+    </div>
+    <div class="form-hint">~50 teams will get early access in Q3. We'll email you when your slot opens.</div>
+    <div class="form-msg" id="form-msg" role="status" aria-live="polite"></div>
+  </form>
+
+  <div class="signature">
+    Built on the open BrainShare protocol — <a href="https://github.com/MachoMaheen/brainshare">github.com/MachoMaheen/brainshare</a>. Free forever for individuals.
+  </div>
+</main>
+<script>
+(function(){
+  var form = document.getElementById('waitlist-form');
+  var msg = document.getElementById('form-msg');
+  var btn = document.getElementById('submit-btn');
+  var input = document.getElementById('email');
+  form.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    var email = (input.value || '').trim();
+    if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) {
+      show('error', "That doesn't look like a valid email.");
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Adding you…';
+    try {
+      var resp = await fetch('/api/company-brain-waitlist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email, source: 'cb-landing' })
+      });
+      var data = await resp.json();
+      if (resp.ok && data.ok) {
+        if (data.alreadyOnList) {
+          show('success', "You're already on the list. We'll be in touch.");
+        } else {
+          show('success', "You're in. We'll email you when your slot opens in Q3.");
+        }
+        input.value = '';
+      } else {
+        show('error', data.error || 'Something went wrong. Try again?');
+      }
+    } catch(e) {
+      show('error', 'Network error. Try again in a moment.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Request access →';
+    }
+  });
+  function show(kind, text){
+    msg.className = 'form-msg ' + kind;
+    msg.textContent = text;
+  }
+})();
+</script>
+</body>
+</html>`;
+}
+
+function renderCompanyBrainThanks(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>You're on the list — Company Brain</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0a0a0c; color: #ecedee; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .box { text-align: center; max-width: 500px; padding: 2em; }
+  h1 { font-size: 2em; margin: 0 0 .5em; }
+  p { color: #9ca0a8; line-height: 1.6; }
+  a { color: #a882ff; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>✓ You're in.</h1>
+  <p>We'll email you when your Company Brain slot opens. Until then, <a href="/">browse the open-source BrainShare protocol</a>.</p>
+</div>
+</body>
+</html>`;
+}

@@ -22,14 +22,16 @@ const css = `
   --kbd-bg: #f6f8fa;
   color-scheme: light dark;
 }
+/* Dark theme — applied when the OS prefers dark AND the user hasn't picked
+   "light" explicitly, OR when they've picked "dark" via the theme toggle. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg-primary: #1e1e1e;
     --bg-secondary: #262626;
     --bg-callout: #2a2a2a;
     --bg-chip: rgba(168, 130, 255, 0.16);
     --text-normal: #dcddde;
-    --text-muted: #8a8a8a;
+    --text-muted: #959595;
     --text-faint: #6a6a6a;
     --text-accent: #a882ff;
     --text-link: #a882ff;
@@ -38,6 +40,21 @@ const css = `
     --code-bg: #2c2c2c;
     --kbd-bg: #333;
   }
+}
+:root[data-theme="dark"] {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #262626;
+  --bg-callout: #2a2a2a;
+  --bg-chip: rgba(168, 130, 255, 0.16);
+  --text-normal: #dcddde;
+  --text-muted: #959595;
+  --text-faint: #6a6a6a;
+  --text-accent: #a882ff;
+  --text-link: #a882ff;
+  --border: #363636;
+  --border-faint: #2c2c2c;
+  --code-bg: #2c2c2c;
+  --kbd-bg: #333;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -48,13 +65,30 @@ body {
   font-size: 16px;
   line-height: 1.6;
 }
+/* Skip-to-main-content link — off-screen until focused */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1em;
+  padding: .5em 1em;
+  background: var(--text-accent);
+  color: #fff;
+  font-size: .9em;
+  font-weight: 600;
+  border-radius: 0 0 6px 6px;
+  text-decoration: none;
+  z-index: 9999;
+  transition: top .1s;
+}
+.skip-link:focus { top: 0; }
 .container { max-width: 760px; margin: 0 auto; padding: 2.5em 1.25em 6em; }
 .wide      { max-width: 1100px; }
 
 /* breadcrumb */
 .breadcrumb {
-  font-size: .85em;
-  color: var(--text-muted);
+  font-size: .82em;
+  letter-spacing: .04em;
+  color: var(--text-faint);
   margin-bottom: .25em;
   display: flex;
   gap: .5em;
@@ -83,33 +117,191 @@ body {
   margin: 1.2em 0 1.6em;
   font-size: .92em;
 }
-.properties h2 {
-  font-size: .8em;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin: 0 0 .4em;
-  border: 0;
-  font-weight: 600;
-}
 .prop-row {
   display: grid;
   grid-template-columns: 130px 1fr;
   gap: .8em;
-  padding: 4px 0;
-  align-items: baseline;
+  padding: 3px 0;
+  align-items: center;
+  min-height: 26px;
 }
-.prop-key { color: var(--text-muted); font-size: .9em; display: flex; gap: .4em; align-items: center; }
-.prop-key .icon { width: 14px; opacity: .7; }
-.prop-val { color: var(--text-normal); word-break: break-word; }
-.prop-val code { font-size: .85em; padding: 1px 6px; }
+.prop-key {
+  font-size: .82em;
+  letter-spacing: .04em;
+  color: var(--text-faint);
+  display: flex;
+  gap: .45em;
+  align-items: center;
+  line-height: 1.3;
+}
+.prop-key svg.prop-icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  opacity: .65;
+}
+.prop-val {
+  font-size: .88em;
+  color: var(--text-muted);
+  word-break: break-word;
+  line-height: 1.4;
+}
+.prop-val code {
+  font-size: .8em;
+  padding: 1px 5px;
+  background: var(--code-bg);
+  border-radius: 3px;
+}
+.prop-val a { color: var(--text-link); text-decoration: none; }
+.prop-val a:hover { text-decoration: underline; }
+/* The chips inside prop-val (rendered by renderFmValue for array values like
+   tags:[foo,bar]) inherited a too-large pill style. Tighten them to match
+   the Notion-density we want here. */
+.prop-val .chip {
+  font-size: .78em;
+  padding: 0 8px;
+  line-height: 1.7;
+  margin: 0 4px 2px 0;
+}
+
+/* ─── Note meta chips (inline, above the article) ──────────────────────
+   Replaces the old behaviour of dumping the entire properties table at
+   the top of every note. These show only tags + status — the highest-
+   signal fields — so the article shows above the fold. */
+.note-meta-chips {
+  display: flex; flex-wrap: wrap; gap: .35em;
+  margin: -.4em 0 1.4em;
+}
+.meta-chip {
+  display: inline-flex; align-items: center;
+  font-size: .8em;
+  padding: .15em .7em;
+  border-radius: 999px;
+  line-height: 1.5;
+}
+.meta-chip-tag {
+  background: var(--bg-chip);
+  color: var(--text-accent);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: .01em;
+}
+.meta-chip-status {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-faint);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-size: .72em;
+  font-weight: 600;
+}
+
+/* ─── Floating theme toggle — top-right of every page ─────────────────────
+   Cycles auto / light / dark. Icon swaps to match the active mode. Sits
+   above all content with z-index, but stays inert (pointer-events) on
+   touch-text-selection. */
+.theme-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-faint);
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1000;
+  transition: color .15s, border-color .15s, transform .15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.theme-toggle:hover {
+  color: var(--text-accent);
+  border-color: var(--text-accent);
+}
+.theme-toggle[data-flash="1"] {
+  transform: scale(1.08) rotate(15deg);
+}
+.theme-toggle .theme-icon {
+  width: 18px; height: 18px;
+}
+@media (max-width: 760px) {
+  .theme-toggle {
+    width: 44px; height: 44px;
+    top: auto;
+    bottom: 18px; right: 18px;
+  }
+  .theme-toggle .theme-icon { width: 20px; height: 20px; }
+}
+
+/* ─── Properties panel — Notion-style: dense, open by default ──────────────
+   Lives near the top of every note (after H1, before article body). Open by
+   default so it mimics Notion's properties-at-top default. Reader can
+   collapse it with one click if they want a totally clean view. */
+details.properties {
+  margin: 0 0 1.4em;
+  background: transparent;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  padding: 0;
+  overflow: hidden;
+}
+.properties-summary {
+  display: flex; align-items: center; gap: .45em;
+  padding: .4em .8em;
+  cursor: pointer;
+  font-size: .72em;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  user-select: none;
+  list-style: none;
+  font-weight: 600;
+}
+.properties-summary::-webkit-details-marker { display: none; }
+.properties-summary::marker { content: ""; }
+.properties-summary::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--text-faint);
+  font-size: .85em;
+  transition: transform .15s ease;
+  width: 9px;
+}
+details.properties[open] .properties-summary::before { transform: rotate(90deg); }
+details.properties[open] .properties-summary {
+  border-bottom: 1px solid var(--border-faint);
+}
+.properties-summary:hover { color: var(--text-muted); }
+.properties-summary-icon { display: none; }  /* the chevron + label are enough */
+.properties-summary-label { font-weight: 600; }
+.properties-summary-count {
+  font-size: .92em;
+  color: var(--text-faint);
+  background: transparent;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.properties-summary-count::before { content: "· "; opacity: .6; }
+.properties-body {
+  padding: .35em .8em .55em;
+}
+@media (max-width: 760px) {
+  .properties-summary { padding: .7em .9em; min-height: 38px; font-size: .78em; }
+  .prop-row { grid-template-columns: 100px 1fr; gap: .55em; }
+  .prop-key { font-size: 12px; }
+  .prop-val { font-size: 13px; }
+}
 .chip {
   display: inline-block;
   background: var(--bg-chip);
   color: var(--text-accent);
-  padding: 1px 9px;
+  padding: 0 7px;
   border-radius: 999px;
-  font-size: .85em;
+  font-size: .82em;
+  letter-spacing: .04em;
   margin-right: 4px;
   margin-bottom: 2px;
 }
@@ -122,9 +314,27 @@ h3 { font-size: 1.15em; }
 p, ul, ol, blockquote { margin: .8em 0; }
 ul, ol { padding-left: 1.4em; }
 li { margin: .25em 0; }
-a { color: var(--text-link); text-decoration: none; border-bottom: 1px solid transparent; }
-a:hover { border-bottom-color: var(--text-link); }
+a { color: var(--text-link); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color .15s; }
+a:hover { border-bottom-color: currentColor; }
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 hr { border: none; border-top: 1px solid var(--border-faint); margin: 2em 0; }
+
+/* Reading metadata — small label under note title */
+.note-reading-meta {
+  display: flex;
+  align-items: center;
+  gap: .55em;
+  font-size: .8em;
+  color: var(--text-faint);
+  margin: -.35em 0 1.4em;
+  font-variant-numeric: tabular-nums;
+}
+.note-reading-meta .rmeta-sep { opacity: .5; }
 
 /* code */
 code {
@@ -133,21 +343,43 @@ code {
   border-radius: 4px;
   font-size: .9em;
   font-family: "SF Mono", Menlo, Consolas, monospace;
+  /* Inline code with long unbroken tokens (ULIDs, file paths, URLs) would
+     otherwise blow the article wider than the viewport on mobile and force
+     a body-level horizontal scrollbar. Break-word lets it wrap. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 pre {
   background: var(--code-bg);
-  padding: .9em 1em;
-  border-radius: 6px;
-  overflow: auto;
-  font-size: .88em;
-  line-height: 1.5;
+  padding: 1em 1.2em;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-width: 100%;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: .9em;
+  line-height: 1.6;
 }
-pre code { background: none; padding: 0; }
+pre code { background: none; padding: 0; word-break: normal; overflow-wrap: normal; }
 
-/* tables */
-table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .94em; }
-th, td { border: 1px solid var(--border-faint); padding: .4em .6em; text-align: left; }
-th { background: var(--bg-secondary); }
+/* tables — scrollable container prevents page-level overflow; min-width on
+   cells prevents the browser from crushing columns below readable size. */
+.prose table {
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+table { border-collapse: collapse; width: max-content; min-width: 100%; margin: 1em 0; font-size: .94em; }
+th, td {
+  border: 1px solid var(--border-faint);
+  padding: .45em .7em;
+  text-align: left;
+  min-width: 90px;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+th { background: var(--bg-secondary); white-space: nowrap; font-weight: 600; }
 
 /* plain blockquotes (non-callout) */
 blockquote {
@@ -188,10 +420,109 @@ blockquote {
   background: var(--bg-secondary); color: var(--text-faint);
   font-size: .85em; font-style: italic;
 }
-.mermaid {
-  display: block; margin: 1.2em auto; text-align: center;
-  background: var(--bg-secondary); padding: 1em; border-radius: 6px;
-  overflow-x: auto;
+/* Mermaid always renders with the "default" (light) theme so the SVG colours
+   never go stale when the user toggles their OS color scheme after page load.
+   The container is locked to white in both light and dark mode — diagrams are
+   always readable regardless of the surrounding page chrome. */
+.mermaid-host {
+  position: relative;
+  margin: 1.2em 0;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid var(--border-faint);
+  overflow: hidden;
+  color-scheme: light;
+}
+.mermaid-host .mermaid {
+  display: block;
+  padding: 1em;
+  overflow: auto;
+  max-height: 70vh;
+  cursor: zoom-in;
+  background: #ffffff;
+  color: #1f2328;
+}
+.mermaid-host .mermaid svg {
+  max-width: none !important;
+  height: auto !important;
+}
+.mermaid-host .mermaid-actions {
+  position: absolute;
+  top: 8px; right: 8px;
+  display: flex; gap: 4px;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 2;
+}
+.mermaid-host:hover .mermaid-actions { opacity: 1; }
+.mermaid-host .mermaid-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  background: var(--bg-secondary); color: var(--text-normal);
+  border: 1px solid var(--border-faint); border-radius: 6px;
+  cursor: pointer; font-size: 14px; line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.mermaid-host .mermaid-btn:hover { border-color: var(--text-accent); color: var(--text-accent); }
+@media (pointer: coarse) {
+  .mermaid-host .mermaid-actions { opacity: 1; }
+  .mermaid-host .mermaid-btn { width: 36px; height: 36px; font-size: 16px; }
+}
+/* Modal background matches the page so the rendered SVG (drawn in the page's
+   color theme) sits on the same surface it was designed for — otherwise a dark
+   backdrop swallows light-theme diagrams and a light backdrop washes out dark
+   ones. */
+.mermaid-modal {
+  position: fixed; inset: 0;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  display: none; z-index: 9999;
+}
+.mermaid-modal.open { display: flex; flex-direction: column; }
+.mermaid-modal-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: 13px; gap: 12px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.mermaid-modal-bar .mermaid-modal-title {
+  font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1; min-width: 0;
+}
+.mermaid-modal-bar .mermaid-controls { display: flex; gap: 6px; flex-shrink: 0; }
+.mermaid-modal-bar button {
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--border-faint); border-radius: 6px;
+  padding: 4px 10px; font-size: 13px; cursor: pointer; min-width: 32px;
+}
+.mermaid-modal-bar button:hover { border-color: var(--text-accent); color: var(--text-accent); }
+/* The stage holds the (light-themed) SVG, so it's locked to white in both
+   light and dark mode. The chrome around it (modal bg, toolbar) stays themed. */
+.mermaid-modal-stage {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  background: #ffffff;
+  color-scheme: light;
+}
+.mermaid-modal-stage.dragging { cursor: grabbing; }
+.mermaid-modal-stage svg {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
+  user-select: none;
+  max-width: none !important; max-height: none !important;
+}
+.mermaid-modal-hint {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, .72);
+  color: #ffffff;
+  font-size: 12px; padding: 6px 12px; border-radius: 999px;
+  pointer-events: none;
 }
 .canvas-title { margin-top: .25em; }
 .canvas-help {
@@ -425,7 +756,7 @@ blockquote {
 /* CALLOUTS — match Obsidian exact look (icon + colored title bar + body) */
 .callout {
   background: var(--bg-callout);
-  border-left: 3px solid var(--callout-color, #a882ff);
+  border-left: 3px solid var(--callout-color, var(--text-accent));
   border-radius: 6px;
   padding: .7em 1em .8em;
   margin: 1em 0;
@@ -435,7 +766,7 @@ blockquote {
   align-items: center;
   gap: .5em;
   font-weight: 600;
-  color: var(--callout-color, #a882ff);
+  color: var(--callout-color, var(--text-accent));
   margin-bottom: .35em;
 }
 .callout-title .callout-icon { display: inline-flex; }
@@ -461,62 +792,254 @@ blockquote {
 /* wrapper landing page */
 .wrap-header h1 { font-size: 2em; margin-bottom: .15em; }
 .wrap-header .desc { color: var(--text-muted); margin-bottom: 1.5em; }
-.wrap-meta { font-size: .85em; color: var(--text-faint); margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--border-faint); }
-
-#graph-host {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-faint);
-  border-radius: 8px;
-  height: 540px;
-  margin: 1em 0 2em;
-  position: relative;
-  overflow: hidden;
+/* Landing hero — gives the page a proper H1 + orientation row instead of
+   dropping the reader straight onto the graph viewer. */
+.wrap-hero {
+  padding: 3em 3em 2em;
+  border-bottom: 1px solid var(--border-faint);
+  margin: 0 0 1.5em;
 }
-.graph-help {
-  position: absolute;
-  top: 8px; left: 12px;
-  font-size: .75em;
-  color: var(--text-faint);
-  pointer-events: none;
-  z-index: 2;
+.wrap-hero h1 {
+  font-size: 2.6em;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+  margin: 0 0 .4em;
 }
-.graph-reset-btn {
-  position: absolute;
-  top: 8px; right: 12px;
-  z-index: 2;
-  padding: .35em .7em;
-  font-size: .8em;
-  background: var(--bg-primary);
+.wrap-hero-desc {
+  font-size: 1.05em;
   color: var(--text-muted);
-  border: 1px solid var(--border-faint);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: opacity .15s, color .15s, border-color .15s;
-  opacity: .85;
+  margin: 0 0 .8em;
+  line-height: 1.5;
+  max-width: 60em;
 }
-.graph-reset-btn:hover {
-  opacity: 1;
+.wrap-hero-meta {
+  display: flex; flex-wrap: wrap; gap: .4em;
+  align-items: center;
+  font-size: .9em;
+  color: var(--text-faint);
+  margin: 0;
+}
+.wrap-hero-meta kbd {
+  background: var(--kbd-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: 3px;
+  padding: 0 .35em;
+  font-size: .85em;
+  font-family: ui-monospace, monospace;
+}
+.wrap-hero-search {
+  display: inline-flex; align-items: center; gap: .35em;
+  padding: .25em .7em;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--border-faint);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: .9em;
+  margin-left: .2em;
+  transition: color .15s, border-color .15s;
+}
+.wrap-hero-search:hover {
   color: var(--text-accent);
   border-color: var(--text-accent);
 }
+.wrap-meta { font-size: .85em; color: var(--text-faint); margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--border-faint); }
+
+/* Graph full-space layout ------------------------------------------------- */
+.graph-wrapper {
+  display: flex;
+  height: calc(100vh - 220px);
+  min-height: 520px;
+  margin: 1.5em 0;
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+#graph-host {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background: var(--bg-secondary);
+}
+.graph-hint-bar {
+  position: absolute;
+  bottom: 10px; left: 12px;
+  font-size: .72em;
+  color: var(--text-faint);
+  pointer-events: none;
+  z-index: 2;
+  letter-spacing: .02em;
+}
+/* Controls open/close ---------------------------------------------------- */
+.graph-wrapper[data-controls="open"] .graph-open-btn { display: none; }
+.graph-wrapper[data-controls="closed"] .graph-controls-panel { display: none; }
+.graph-wrapper[data-controls="closed"] .graph-open-btn { display: flex; }
+.graph-open-btn {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 4;
+  padding: .3em .65em;
+  font-size: .78em;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  align-items: center; gap: .3em;
+  transition: color .15s, border-color .15s;
+}
+.graph-open-btn:hover { color: var(--text-accent); border-color: var(--text-accent); }
+/* Controls panel ---------------------------------------------------------- */
+.graph-controls-panel {
+  width: 230px;
+  flex-shrink: 0;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  font-size: .82em;
+}
+.gcp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .8em 1em .6em;
+  font-weight: 600;
+  font-size: .95em;
+  border-bottom: 1px solid var(--border-faint);
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  z-index: 1;
+}
+.gcp-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 1em;
+  line-height: 1;
+  padding: .2em .3em;
+  border-radius: 4px;
+  transition: color .12s;
+}
+.gcp-close-btn:hover { color: var(--text-normal); }
+.gcp-section {
+  padding: .75em 1em .8em;
+  border-bottom: 1px solid var(--border-faint);
+}
+.gcp-section-title {
+  font-size: .68em;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: .7em;
+}
+.gcp-row { margin-bottom: .65em; }
+.gcp-row:last-child { margin-bottom: 0; }
+.gcp-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .3em;
+}
+.gcp-label { color: var(--text-muted); }
+.gcp-val { color: var(--text-faint); font-variant-numeric: tabular-nums; min-width: 2.5em; text-align: right; }
+input[type="range"].gcp-slider {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--text-accent);
+  cursor: pointer;
+  margin: 0;
+}
+.gcp-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .55em;
+}
+.gcp-toggle-row:last-child { margin-bottom: 0; }
+.gcp-toggle {
+  width: 34px; height: 20px;
+  border-radius: 10px;
+  border: none;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+.gcp-toggle::after {
+  content: "";
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px; left: 3px;
+  transition: left .15s, box-shadow .15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.gcp-toggle.active { background: var(--text-accent); }
+.gcp-toggle.active::after { left: 17px; }
+.gcp-apply-btn {
+  width: 100%;
+  padding: .45em;
+  background: var(--text-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: .88em;
+  margin-top: .55em;
+  transition: opacity .12s;
+}
+.gcp-apply-btn:hover { opacity: .88; }
+.gcp-reset-btn {
+  width: 100%;
+  padding: .5em;
+  background: transparent;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: .88em;
+  transition: color .12s, border-color .12s;
+}
+.gcp-reset-btn:hover { color: var(--text-accent); border-color: var(--text-accent); }
 
 .note-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: .5em;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: .65em;
   list-style: none;
   padding: 0;
 }
 .note-list li { margin: 0; }
 .note-list a {
-  display: block;
-  padding: .55em .8em;
-  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: .85em 1em .8em;
+  border-radius: 8px;
   border: 1px solid var(--border-faint);
+  border-left: 3px solid var(--border-faint);
   background: var(--bg-secondary);
   color: var(--text-normal);
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
-.note-list a:hover { border-color: var(--text-accent); background: var(--bg-chip); }
+.note-list a:hover {
+  border-color: var(--text-accent);
+  border-left-color: var(--text-accent);
+  background: var(--bg-primary);
+  box-shadow: 0 3px 10px rgba(0,0,0,.08);
+  transform: translateY(-2px);
+}
 .note-list .folder { font-size: .75em; color: var(--text-faint); display: block; margin-bottom: 2px; }
 /* Wrapper landing layout: persistent left sidebar + flexible main pane */
 .wrap-shell {
@@ -527,7 +1050,6 @@ blockquote {
 .wrap-sidebar {
   flex: 0 0 280px;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-faint);
   position: sticky;
   top: 0;
   height: 100vh;
@@ -552,24 +1074,27 @@ blockquote {
 .sidebar-toggle:hover { color: var(--text-accent); border-color: var(--text-accent); }
 .sidebar-inner { padding: 1.4em 1.1em; }
 .sidebar-header { margin-bottom: 1em; padding-right: 32px; }
-.sidebar-title { font-size: 1.15em; line-height: 1.25; margin: 0 0 .25em; color: var(--text-normal); }
-.sidebar-badge { margin: .2em 0 .4em; }
+.sidebar-title { font-size: 1.15em; line-height: 1.25; margin: 0 0 .25em; color: var(--text-muted); }
+.sidebar-badge { margin: .2em 0 .4em; color: var(--text-muted); }
 .sidebar-desc { font-size: .82em; color: var(--text-muted); line-height: 1.4; margin: .4em 0 0;
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
 .sidebar-cta {
   display: inline-flex; align-items: center; gap: .35em;
-  font-size: .8em; color: var(--text-accent) !important;
+  font-size: .8em;
   text-decoration: none !important;
-  padding: .25em 0; margin: .2em 0 1em;
+  padding: .25em .6em; margin: .2em 0 1em;
+  background: var(--bg-chip);
+  color: var(--text-accent) !important;
+  border-radius: 3px;
 }
-.sidebar-cta:hover { text-decoration: underline !important; }
+.sidebar-cta:hover { opacity: .8; text-decoration: none !important; }
 .sidebar-section { margin-bottom: 1em; }
 .sidebar-section-title {
-  font-size: .68em;
-  text-transform: uppercase;
-  letter-spacing: .06em;
   color: var(--text-faint);
+  font-size: .72em;
+  letter-spacing: .12em;
+  text-transform: uppercase;
   font-weight: 600;
   margin: 0 0 .35em;
   padding: 0 .2em;
@@ -600,6 +1125,7 @@ blockquote {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 500;
+  color: var(--text-muted);
 }
 .tree-folder-count {
   font-size: .75em; color: var(--text-faint);
@@ -629,7 +1155,7 @@ blockquote {
   font-size: .85em;
   background: var(--bg-primary);
   border: 1px solid var(--border-faint);
-  border-radius: 6px;
+  border-radius: 4px;
   color: var(--text-normal);
   font-family: inherit;
   outline: none;
@@ -639,9 +1165,10 @@ blockquote {
   background-position: 8px center;
   background-size: 14px 14px;
 }
+.sidebar-filter-input::placeholder { color: var(--text-faint); }
 .sidebar-filter-input:focus {
+  box-shadow: 0 0 0 2px rgba(127,109,242,0.2);
   border-color: var(--text-accent);
-  box-shadow: 0 0 0 2px var(--bg-chip);
 }
 .sidebar-filter-input::-webkit-search-cancel-button {
   -webkit-appearance: none;
@@ -688,7 +1215,7 @@ blockquote {
 .tree-file-name {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: .92em;
+  font-size: .875em;
 }
 .tree-file-tag {
   font-size: .62em;
@@ -719,6 +1246,7 @@ blockquote {
   flex: 1; min-width: 0;
   padding: 2em 2em 4em;
   max-width: none;
+  background: var(--bg-primary);
 }
 /* On note pages inside the wrapper shell, constrain the prose to a
    readable line-length and centre it in the available main pane. The
@@ -726,7 +1254,18 @@ blockquote {
 .wrap-main .prose {
   max-width: 760px;
   margin: 0 auto;
+  /* Belt-and-suspenders: never let a child overflow the prose column. Any
+     individual element that needs to be wider than the column (code blocks,
+     tables, mermaid, canvas) already provides its own internal scrollbar via
+     overflow-x:auto, so this just stops accidents from forcing the whole
+     page to scroll horizontally on mobile. */
+  min-width: 0;
 }
+/* Same min-width:0 protection on the main column itself — flex items default
+   to min-width:auto, which means a long unbroken line inside a child can
+   inflate the flex item past the viewport. Setting min-width:0 lets the
+   column shrink so inner-scroll children (pre, table, mermaid) take over. */
+.wrap-main { min-width: 0; }
 .wrap-main-canvas { padding: 1.2em 1.2em 3em; }
 .sidebar-title-link {
   color: inherit !important;
@@ -846,18 +1385,292 @@ blockquote {
 .cmd-help-foot { margin: 12px 0 0; font-size: 12px; color: var(--text-faint); border-top: 1px solid var(--border-faint); padding-top: 10px; }
 @media (max-width: 760px) {
   .wrap-shell { flex-direction: column; }
-  .wrap-sidebar {
-    flex: 0 0 auto; width: 100%;
-    height: auto; max-height: 50vh;
-    position: static; border-right: none;
+
+  /* Sticky topbar strip — injected into DOM by JS on mobile */
+  .mobile-topbar {
+    display: flex; align-items: center; gap: .6em;
+    position: sticky; top: 0; z-index: 50;
+    height: 56px; padding: 0 1em;
+    background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-faint);
+    flex-shrink: 0;
   }
-  .wrap-sidebar.collapsed { max-height: 48px; }
+  .mobile-topbar-title {
+    font-size: .92em; font-weight: 600; color: var(--text-normal);
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* ☰ open button in the topbar (separate from the ✕ close button in the drawer) */
+  .mobile-menu-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px;
+    background: var(--bg-chip);
+    border: 1px solid var(--border-faint);
+    border-radius: 6px;
+    font-size: 1.25em; cursor: pointer;
+    color: var(--text-normal);
+    flex-shrink: 0;
+  }
+
+  /* Sidebar: fixed overlay drawer, initially off-screen to the left */
+  .wrap-sidebar {
+    position: fixed !important; left: 0; top: 0;
+    width: min(320px, 85vw); height: 100vh;
+    flex: none !important;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform .25s cubic-bezier(.25,.46,.45,.94);
+    overflow-y: auto;
+    border-right: 1px solid var(--border-faint);
+    border-bottom: none;
+    box-shadow: none;
+  }
+  .wrap-sidebar.open {
+    transform: translateX(0);
+    box-shadow: 8px 0 40px rgba(0,0,0,.35);
+  }
+  /* Semi-transparent backdrop behind open drawer */
+  .sidebar-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 199;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sidebar-backdrop.active { display: block; }
+  /* ✕ close button inside the drawer — bigger touch target on mobile */
+  .sidebar-toggle {
+    width: 40px; height: 40px;
+    top: 8px; right: 10px;
+    font-size: 1.2em;
+  }
+
   .wrap-main { padding: 1em 1em 3em; }
+  /* Touch targets — Apple HIG / Material both say ≥44px. The desktop sizes
+     are 22–29px which is fine with a mouse and unusable on a phone. Bump
+     every interactive element in the sidebar + hero on mobile. */
+  .tree-file {
+    padding-top: .7em; padding-bottom: .7em;
+    font-size: 1em;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+  .tree-children .tree-file { padding-left: 2.2em; }
+  .tree-folder > summary {
+    padding-top: .7em; padding-bottom: .7em;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+  .sidebar-cta {
+    padding-top: .7em; padding-bottom: .7em;
+    min-height: 44px;
+    align-items: center;
+  }
+  .sidebar-filter-input {
+    min-height: 44px;
+    font-size: 1em;
+  }
+  .sidebar-filter-hint {
+    padding: .7em 1em;
+    min-height: 44px;
+    font-size: .92em;
+  }
+  .wrap-hero-search {
+    padding: .55em 1em;
+    min-height: 40px;
+    font-size: .95em;
+  }
+  .wrap-hero-meta {
+    gap: .55em;
+    font-size: .92em;
+  }
+  /* Graph: on phones collapse the controls panel and give the canvas more height */
+  .graph-wrapper {
+    height: 72vh;
+    min-height: 360px;
+    flex-direction: column;
+  }
+  .graph-controls-panel {
+    width: 100%;
+    max-height: 0;
+    overflow: hidden;
+    border-left: none;
+    border-top: 1px solid var(--border-faint);
+  }
+  .graph-wrapper[data-controls="open"] .graph-controls-panel {
+    max-height: 260px;
+  }
 }
 .wrap-actions {
   display: flex; gap: .5em; flex-wrap: wrap;
   margin: .8em 0 .4em;
+}
+/* Secondary action row above each note — search, copy, theme. Subtle ghost
+   buttons so they don't compete with the article. */
+.note-actions {
+  display: flex; gap: .35em; flex-wrap: wrap;
+  margin: .25em 0 1em;
+  font-size: .85em;
+}
+.note-action-btn {
+  display: inline-flex; align-items: center; gap: .35em;
+  padding: .3em .7em;
+  font-size: .85em;
+  letter-spacing: .04em;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none !important;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.note-action-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  border-color: var(--border);
+}
+.note-action-btn .action-emoji {
+  font-size: 1em; line-height: 1;
+}
+.note-action-btn[data-flash="ok"] {
+  color: var(--text-accent); border-color: var(--text-accent); background: var(--bg-chip);
+}
+@media (pointer: coarse) {
+  .note-action-btn { padding: .45em .9em; font-size: .92em; min-height: 44px; }
+}
+
+/* "Notes that link here" panel — Obsidian-style backlinks below the body. */
+.note-backlinks {
+  margin: 3em 0 1em;
+  padding: 1.2em 1.4em 1.4em;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+.note-backlinks-heading {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0 0 .8em;
+  color: var(--text-muted);
+  display: flex; align-items: center; gap: .4em;
+}
+.note-backlinks-heading .emoji { font-size: 1.1em; }
+.backlinks-count {
+  background: var(--bg-chip);
+  color: var(--text-accent);
+  font-size: .75em;
+  padding: .1em .55em;
+  border-radius: 999px;
+  margin-left: .2em;
+}
+.note-backlinks-list {
+  list-style: none;
+  padding: 0; margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: .3em;
+}
+.note-backlinks-list a {
+  display: flex; flex-direction: column; gap: .15em;
+  padding: .55em .7em;
+  border-radius: 6px;
+  text-decoration: none !important;
+  color: var(--text-normal) !important;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  transition: border-color .15s, color .15s;
+}
+.note-backlinks-list a:hover {
+  border-color: var(--text-accent);
+  color: var(--text-accent) !important;
+}
+.backlink-title { font-size: .95em; line-height: 1.3; }
+.backlink-folder {
+  font-size: .78em;
+  letter-spacing: .04em;
+  color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Previous / Next within folder — two-button nav at the foot of each note. */
+.folder-nav {
+  margin: 2em 0 1em;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .8em;
+}
+.folder-nav-link {
+  display: flex; flex-direction: column; gap: .2em;
+  padding: .9em 1.1em;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-faint);
+  text-decoration: none !important;
+  color: var(--text-normal) !important;
+  transition: border-color .15s, color .15s;
+  min-width: 0;
+}
+.folder-nav-link:hover { border-color: var(--text-accent); color: var(--text-accent) !important; }
+.folder-nav-next { text-align: right; }
+.folder-nav-dir {
+  font-size: .72em;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.folder-nav-title {
+  font-size: 1em;
+  line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.folder-nav-placeholder {} /* keep the grid 2-column layout when one side is missing */
+@media (max-width: 600px) {
+  .folder-nav { grid-template-columns: 1fr; }
+  .folder-nav-next { text-align: left; }
+}
+
+/* Auto-TOC — sticky right-rail of section anchors. Hidden under 1100px since
+   the main column already shrinks; mobile readers don't lose anything because
+   ⌘K search covers the same need. */
+.note-toc {
+  position: fixed;
+  top: 90px;
+  right: 1.6em;
+  max-width: 220px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  font-size: .82em;
+  line-height: 1.4;
+  padding: 0.4em .6em;
+  border-left: 2px solid var(--border-faint);
+  color: var(--text-muted);
+}
+.note-toc-title {
+  font-size: .72em;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin: 0 0 .35em;
+}
+.note-toc-list {
+  list-style: none;
+  padding: 0; margin: 0;
+}
+.note-toc-item { margin: 0; font-size: .88em; }
+.note-toc-item a {
+  display: block;
+  padding: .15em .2em;
+  border-radius: 3px;
+  color: var(--text-muted) !important;
+  text-decoration: none !important;
+  transition: color .15s;
+}
+.note-toc-item a:hover { color: var(--text-accent) !important; }
+.note-toc-item a.active { color: var(--text-accent) !important; font-weight: 500; }
+.note-toc-l3 a { padding-left: 1em; font-size: .94em; }
+@media (max-width: 1099px) {
+  .note-toc { display: none; }
 }
 .action-btn {
   display: inline-flex; align-items: center; gap: .4em;
@@ -892,40 +1705,384 @@ blockquote {
   background: rgba(127,109,242,0.15); border-radius: 6px;
 }
 .folder-heading {
-  display: flex; align-items: center; gap: .5em;
-  font-size: .95em; font-weight: 500;
+  display: flex; align-items: center; gap: .55em;
+  font-size: .82em; font-weight: 600;
   color: var(--text-muted);
-  margin: 1.4em 0 .4em;
-  padding-bottom: .25em;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin: 1.8em 0 .55em;
+  padding-bottom: .35em;
   border-bottom: 1px solid var(--border-faint);
   scroll-margin-top: 1em;
 }
-.folder-heading .folder-icon { color: var(--text-faint); }
+.folder-heading .folder-icon { display: none; }
 .folder-heading .folder-count {
-  margin-left: auto; font-size: .8em; color: var(--text-faint); font-weight: normal;
+  margin-left: auto;
+  font-size: .9em;
+  color: var(--text-faint);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--bg-secondary);
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-faint);
 }
-.note-list .title  { font-weight: 500; }
+.note-list .title  { font-weight: 500; font-size: .96em; line-height: 1.35; display: block; }
 .note-list .ulid   { font-size: .7em; color: var(--text-faint); display: block; margin-top: 2px; font-family: "SF Mono", Menlo, monospace; }
 .note-list .missing a { opacity: .5; text-decoration: line-through; }
+/* Subtle arrow hint on hover */
+.note-list a::after {
+  content: "→";
+  font-size: .75em;
+  color: var(--text-faint);
+  align-self: flex-end;
+  margin-top: .4em;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+.note-list a:hover::after {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--text-accent);
+}
 
 /* gated badges + error page */
-.gated-badge { background: rgba(168, 130, 255, 0.18); color: var(--text-accent); border-color: var(--text-accent); }
+.gated-badge {
+  font-size: .75em;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  background: var(--bg-chip);
+  color: var(--text-accent);
+  border-radius: 2px;
+  border-color: var(--text-accent);
+}
 .gated-pill {
   display: inline-block;
-  font-size: .6em;
-  background: rgba(168, 130, 255, 0.18);
+  background: var(--bg-chip);
   color: var(--text-accent);
+  border: 1px solid transparent;
+  font-size: .78em;
+  letter-spacing: .06em;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: 2px;
   margin-left: .5em;
   vertical-align: middle;
-  letter-spacing: .03em;
 }
 .gate-error { text-align: center; padding: 6em 0; }
 .gate-error .gate-icon { font-size: 3em; opacity: .5; margin-bottom: .3em; }
 .gate-error h1 { border: 0; }
 .gate-error .gate-msg { color: var(--text-muted); font-size: 1.05em; margin: .8em 0 1.5em; }
 .gate-error .gate-hint { font-size: .9em; color: var(--text-faint); max-width: 480px; margin: 0 auto; }
+
+/* Wikilink hover-preview popover */
+.wikilink-preview {
+  position: absolute;
+  z-index: 9999;
+  max-width: 340px;
+  min-width: 220px;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.06);
+  padding: .85em 1em;
+  font-size: .88em;
+  line-height: 1.5;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.wikilink-preview.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.wikilink-preview-title {
+  font-weight: 600;
+  margin: 0 0 .35em;
+  color: var(--text-normal);
+  font-size: .95em;
+  line-height: 1.3;
+}
+.wikilink-preview-body {
+  color: var(--text-muted);
+  font-size: .85em;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wikilink-preview-folder {
+  font-size: .7em;
+  color: var(--text-faint);
+  margin-top: .4em;
+  padding-top: .4em;
+  border-top: 1px solid var(--border-faint);
+  letter-spacing: .04em;
+}
+@media (pointer: coarse) {
+  /* Touch devices: disable hover preview to avoid sticky popovers */
+  .wikilink-preview { display: none !important; }
+}
+
+/* Reading progress — thin fixed bar at top of viewport */
+.read-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 0;
+  background: var(--text-accent);
+  z-index: 10000;
+  transition: width .08s linear;
+  pointer-events: none;
+}
+
+/* Read-state marker — dim notes the user has already opened */
+.note-list a.is-read .title {
+  color: var(--text-muted);
+  opacity: .75;
+}
+.note-list a.is-read::before {
+  content: "✓";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: .72em;
+  color: var(--text-faint);
+  opacity: .55;
+}
+.note-list a { position: relative; }
+
+/* "NEW since last visit" badge */
+.note-list a.is-new::after {
+  content: "NEW";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: .58em;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--text-accent);
+  background: var(--bg-chip);
+  padding: 1px 5px;
+  border-radius: 3px;
+  opacity: 1 !important;
+  transform: none !important;
+}
+.note-list a.is-new.is-read::before { display: none; }
+.note-list a.is-new::after { opacity: 1; }
+
+/* Recently updated section */
+.recently-updated {
+  margin: 1.2em 0 1.5em;
+  padding: .9em 1em .75em;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+.recently-updated-heading {
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  margin: 0 0 .8em;
+  font-size: .78em;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.recently-updated-heading::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-accent);
+  box-shadow: 0 0 0 3px var(--bg-chip);
+}
+.recently-updated-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: .55em;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.recently-updated-list a {
+  display: block;
+  padding: .55em .75em;
+  border-radius: 6px;
+  font-size: .92em;
+  color: var(--text-normal);
+  border: 1px solid transparent;
+  transition: background .12s ease, border-color .12s ease;
+}
+.recently-updated-list a:hover {
+  background: var(--bg-primary);
+  border-color: var(--border-faint);
+}
+.recently-updated-list .ru-date {
+  display: block;
+  font-size: .72em;
+  color: var(--text-faint);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── New hero (launch-ready) ───────────────────────────────────────────── */
+.wrap-hero { padding: 2.5em 1.5em 2em; border-bottom: 1px solid var(--border-faint); }
+.wrap-hero-byline {
+  font-size: .82em;
+  color: var(--text-faint);
+  letter-spacing: .04em;
+  margin-bottom: .5em;
+  text-transform: uppercase;
+}
+.wrap-hero-author { color: var(--text-accent); font-weight: 600; letter-spacing: 0; text-transform: none; }
+.wrap-hero-title {
+  font-size: 2.4em;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  margin: 0 0 .35em;
+  color: var(--text-normal);
+}
+.wrap-hero-desc {
+  font-size: 1.05em;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0 0 1.3em;
+  max-width: 70ch;
+}
+.wrap-hero-actions {
+  display: flex; gap: .6em; flex-wrap: wrap;
+  margin: 0 0 1.2em;
+}
+.wrap-hero-cta {
+  display: inline-flex; align-items: center; gap: .45em;
+  padding: .6em 1.2em;
+  border-radius: 8px;
+  font-size: .92em;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+}
+.wrap-hero-cta-primary {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #7c3aed 100%);
+  background-size: 200% 200%;
+  background-position: 0% 50%;
+  color: #fff;
+  border-color: transparent !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.1);
+  font-weight: 600;
+}
+.wrap-hero-cta-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.15) 50%, transparent 65%);
+  transform: translateX(-120%);
+  transition: transform .55s ease;
+}
+.wrap-hero-cta-primary:hover {
+  background-position: 100% 50%;
+  box-shadow: 0 4px 16px rgba(109,40,217,.35), inset 0 1px 0 rgba(255,255,255,.15);
+  transform: translateY(-1px);
+}
+.wrap-hero-cta-primary:hover::after {
+  transform: translateX(120%);
+}
+.wrap-hero-cta-primary kbd {
+  background: rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.2);
+  color: rgba(255,255,255,.9);
+}
+.wrap-hero-cta-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.wrap-hero-cta-secondary:hover {
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  border-color: var(--text-accent);
+}
+.wrap-hero-cta kbd {
+  background: rgba(255,255,255,.18);
+  border: none;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: .85em;
+  margin-left: .15em;
+}
+.wrap-hero-cta-secondary kbd { background: var(--kbd-bg); color: var(--text-muted); }
+.wrap-hero-stats {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5em;
+  font-size: .85em;
+  color: var(--text-faint);
+}
+.wrap-hero-stats .wrap-stat strong { color: var(--text-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.wrap-hero-stats .wrap-stat-sep { opacity: .5; }
+
+/* ─── New "Recently updated" card design ────────────────────────────────── */
+.recently-updated-list-v2 {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.recently-updated-list-v2 li { border-bottom: 1px solid var(--border-faint); }
+.recently-updated-list-v2 li:last-child { border-bottom: none; }
+.recently-updated-list-v2 a {
+  display: flex;
+  align-items: baseline;
+  gap: .9em;
+  padding: .65em .1em;
+  color: var(--text-normal);
+  text-decoration: none;
+  transition: color .12s;
+}
+.recently-updated-list-v2 a:hover { color: var(--text-accent); }
+.ru-card-title {
+  font-size: .9em;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ru-card-folder {
+  font-size: .72em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ru-card-meta {
+  display: flex; align-items: center; gap: .3em;
+  font-size: .72em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ru-card-meta .ru-card-dot { opacity: .4; }
+
+@media (max-width: 760px) {
+  .wrap-hero-title { font-size: 1.85em; }
+  .wrap-hero { padding: 1.8em 1.1em 1.5em; }
+  .wrap-hero-cta { padding: .7em 1em; font-size: .95em; min-height: 44px; }
+  .recently-updated-list-v2 a { flex-wrap: wrap; gap: .4em; }
+  .ru-card-folder { display: none; }
+}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -961,7 +2118,10 @@ const ICON: Record<string, string> = {
   note:     svg("M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"),
 };
 function svg(d: string): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+  // Explicit width/height + class so the icon renders at the intended 14×14
+  // size instead of the SVG default (which scales to fill its parent — that's
+  // what caused the huge calendar/tag/checkmark icons in the property panel).
+  return `<svg class="prop-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
 }
 
 const PROP_ICON: Record<string, string> = {
@@ -1101,6 +2261,7 @@ export interface NoteMeta { path: string; basename: string; }
 export interface WrapData {
   title?: string;
   description?: string;
+  author?: string;       // optional byline shown in the hero
   ulids: string[];
   canvases?: string[];                // canvas ULIDs in this share
   assets?: Record<string, string>;    // image filename → opaque asset key
@@ -1271,7 +2432,7 @@ export function renderTreeSidebar(opts: {
         const tag = f.kind === "canvas"
           ? `<span class="tree-file-tag">canvas</span>` : "";
         const cls = f.isActive ? "tree-file active" : "tree-file";
-        return `<a class="${cls}" href="${href}"><span class="tree-file-name">${escapeHtml(f.label)}</span>${tag}</a>`;
+        return `<a class="${cls}" href="${href}" data-ulid="${f.ulid}"><span class="tree-file-name">${escapeHtml(f.label)}</span>${tag}</a>`;
       }).join("");
     if (isRoot) return childHtml;
     const total = countDescendants(node);
@@ -1285,16 +2446,16 @@ export function renderTreeSidebar(opts: {
   const meta = `${noteCount} note${noteCount === 1 ? "" : "s"}` +
     (opts.canvases.length ? ` · ${opts.canvases.length} canvas${opts.canvases.length === 1 ? "" : "es"}` : "") +
     (opts.assetCount ? ` · ${opts.assetCount} asset${opts.assetCount === 1 ? "" : "s"}` : "");
-  const gatedBadge = opts.gated ? `<div class="sidebar-badge"><span class="gated-pill" title="this share requires a token">🔒 gated</span></div>` : "";
-  const desc = opts.description ? `<p class="sidebar-desc">${escapeHtml(opts.description)}</p>` : "";
+  const gatedBadge = opts.gated ? `<div class="sidebar-badge"><span class="gated-pill" title="this share requires a token">gated</span></div>` : "";
+  const desc = "";
   const downloadLink = opts.showDownload
-    ? `<a class="sidebar-cta" href="${opts.shareBase}/download${tq}" download>⬇ Download as .zip</a>`
+    ? `<a class="sidebar-cta" href="${opts.shareBase}/download${tq}" download>Download Notes <sub>.zip</sub></a>`
     : `<a class="sidebar-cta" href="${opts.shareBase}${tq}">← back to overview</a>`;
   return `<aside class="wrap-sidebar" id="wrap-sidebar">
   <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle navigation">☰</button>
   <div class="sidebar-inner">
     <div class="sidebar-header">
-      <h1 class="sidebar-title"><a href="${opts.shareBase}${tq}" class="sidebar-title-link">${escapeHtml(opts.title)}</a></h1>
+      <div class="sidebar-title" role="heading" aria-level="2"><a href="${opts.shareBase}${tq}" class="sidebar-title-link">${escapeHtml(opts.title)}</a></div>
       ${gatedBadge}
       ${desc}
     </div>
@@ -1303,7 +2464,6 @@ export function renderTreeSidebar(opts: {
       <input type="search" id="sidebar-filter" class="sidebar-filter-input" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter files in sidebar">
       <button type="button" class="sidebar-filter-hint" id="sidebar-filter-hint" aria-label="Open command palette for full content search">
         <span class="sidebar-filter-hint-text">⌘K for full search</span>
-        <span class="sidebar-filter-hint-icon" aria-hidden="true">🔎</span>
       </button>
     </div>
     <div class="sidebar-section">
@@ -1319,14 +2479,75 @@ const SIDEBAR_TOGGLE_JS = `<script>
 (function(){
   var btn = document.getElementById("sidebar-toggle");
   var sb = document.getElementById("wrap-sidebar");
-  if (btn && sb) btn.addEventListener("click", function(){ sb.classList.toggle("collapsed"); });
-  // On narrow viewports, collapse the sidebar after a tree-link click so the
-  // user can read the note. Mirrors Obsidian mobile's behaviour.
-  if (sb && matchMedia("(max-width: 760px)").matches) {
-    sb.querySelectorAll(".tree-file").forEach(function(a){
-      a.addEventListener("click", function(){ sb.classList.add("collapsed"); });
+  var isMobile = matchMedia("(max-width: 760px)").matches;
+
+  if (isMobile && sb) {
+    // ── Mobile: overlay drawer pattern ──────────────────────────────────────
+    // The existing sidebar-toggle (btn) stays INSIDE the drawer as the ✕ close button.
+    // A new ☰ open button is created for the sticky topbar.
+    if (btn) {
+      btn.textContent = "✕";
+      btn.setAttribute("aria-label", "Close navigation");
+    }
+
+    // Build sticky topbar: [☰ open btn] [vault title]
+    var openBtn = document.createElement("button");
+    openBtn.className = "mobile-menu-btn";
+    openBtn.textContent = "☰";
+    openBtn.setAttribute("aria-label", "Open navigation");
+    openBtn.setAttribute("aria-expanded", "false");
+
+    var topbar = document.createElement("div");
+    topbar.className = "mobile-topbar";
+    var titleEl = sb.querySelector(".sidebar-title");
+    var titleText = titleEl ? titleEl.textContent || "" : "";
+    var titleSpan = document.createElement("span");
+    titleSpan.className = "mobile-topbar-title";
+    titleSpan.textContent = titleText;
+    topbar.appendChild(openBtn);
+    topbar.appendChild(titleSpan);
+    sb.parentNode.insertBefore(topbar, sb);
+
+    // Backdrop
+    var backdrop = document.createElement("div");
+    backdrop.className = "sidebar-backdrop";
+    document.body.appendChild(backdrop);
+
+    function openDrawer() {
+      sb.classList.add("open");
+      backdrop.classList.add("active");
+      document.body.style.overflow = "hidden";
+      openBtn.setAttribute("aria-expanded", "true");
+    }
+    function closeDrawer() {
+      sb.classList.remove("open");
+      backdrop.classList.remove("active");
+      document.body.style.overflow = "";
+      openBtn.setAttribute("aria-expanded", "false");
+    }
+
+    openBtn.addEventListener("click", openDrawer);
+    if (btn) btn.addEventListener("click", closeDrawer);
+    backdrop.addEventListener("click", closeDrawer);
+    sb.querySelectorAll(".tree-file").forEach(function(a) {
+      a.addEventListener("click", closeDrawer);
+    });
+
+  } else if (btn && sb) {
+    // ── Desktop: collapse sidebar to 48px icon rail ──────────────────────────
+    btn.setAttribute("aria-expanded", sb.classList.contains("collapsed") ? "false" : "true");
+    btn.addEventListener("click", function(){
+      sb.classList.toggle("collapsed");
+      btn.setAttribute("aria-expanded", sb.classList.contains("collapsed") ? "false" : "true");
     });
   }
+
+  document.querySelectorAll("[data-open-palette]").forEach(function(el){
+    el.addEventListener("click", function(ev){
+      ev.preventDefault();
+      if (window.__brainshareOpenPalette) window.__brainshareOpenPalette();
+    });
+  });
 
   // ── Sidebar filter (visible search bar above the tree) ─────────────────
   // Filters tree nodes as the user types. A folder stays visible if its name
@@ -1773,6 +2994,59 @@ export function buildEdges(records: NoteRecord[]): Array<{ from: string; to: str
   return edges;
 }
 
+/**
+ * Reverse of buildEdges: for each note (target), who links TO it?
+ * The result powers the "Notes that link here" panel on note pages, the same
+ * way Obsidian's backlinks pane works.
+ *
+ * Returns Map<targetUlid, Array<{ulid, basename, path, title}>>.
+ */
+export function buildBacklinks(records: NoteRecord[]): Map<string, Array<{ ulid: string; basename: string; path: string; title: string }>> {
+  const setByBasename = shareSetFromNotes(records);
+  const byTarget = new Map<string, Array<{ ulid: string; basename: string; path: string; title: string }>>();
+  const seen = new Set<string>();
+  for (const source of records) {
+    if (!source.md) continue;
+    const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source.md))) {
+      const target = m[1].trim();
+      const targetUlid = setByBasename.get(target);
+      if (!targetUlid || targetUlid === source.ulid) continue;
+      const k = `${targetUlid}|${source.ulid}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const list = byTarget.get(targetUlid) ?? [];
+      list.push({ ulid: source.ulid, basename: source.basename, path: source.path, title: source.title });
+      byTarget.set(targetUlid, list);
+    }
+  }
+  return byTarget;
+}
+
+/**
+ * For the current note within a folder, return the previous/next sibling notes
+ * (sorted by basename). Powers the prev/next nav at the foot of every note.
+ */
+export function folderSiblings(
+  current: { ulid: string; path: string },
+  all: Array<{ ulid: string; path: string; basename: string; title: string }>
+): { prev?: { ulid: string; title: string }; next?: { ulid: string; title: string } } {
+  const folder = current.path.includes("/") ? current.path.split("/").slice(0, -1).join("/") : "";
+  const siblings = all
+    .filter((n) => {
+      const f = n.path.includes("/") ? n.path.split("/").slice(0, -1).join("/") : "";
+      return f === folder;
+    })
+    .sort((a, b) => a.basename.localeCompare(b.basename));
+  const i = siblings.findIndex((n) => n.ulid === current.ulid);
+  if (i < 0) return {};
+  return {
+    prev: i > 0 ? { ulid: siblings[i - 1].ulid, title: siblings[i - 1].title } : undefined,
+    next: i < siblings.length - 1 ? { ulid: siblings[i + 1].ulid, title: siblings[i + 1].title } : undefined,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Note rendering (with breadcrumb + properties + Obsidian chrome)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1795,24 +3069,31 @@ export interface RenderCtx {
     canvases: CanvasLite[];
     assetCount: number;
   };
+  // "Notes that link here" — already-resolved list of source notes whose
+  // wikilinks point at the current note. Rendered as a panel after the body.
+  backlinks?: Array<{ ulid: string; title: string; path: string }>;
+  // Previous / next sibling within the current folder, for in-place reading
+  // of a multi-part series without going back to the landing.
+  folderNav?: { prev?: { ulid: string; title: string }; next?: { ulid: string; title: string } };
 }
 
 export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
   const { fm, body: rawBody } = parseFrontmatter(md);
-  // Title falls back through: frontmatter title → filename basename (from ctx.path) → ULID.
-  // The filename is what the user actually recognises; ULID is only the last resort
-  // for orphan notes published without path metadata.
+  // Title falls back through: body's leading H1 (highest signal — that's what
+  // the AUTHOR wrote) → frontmatter title → filename basename → ULID.
+  const bodyH1Match = rawBody.match(/^\s*#\s+(.+?)\s*$/m);
+  const bodyH1 = bodyH1Match ? bodyH1Match[1].trim() : "";
   const fileTitle = ctx?.path?.split("/").pop()?.replace(/\.md$/i, "");
-  const title = (fm?.byKey.get("title") as string) || fileTitle || ulid;
+  const title = bodyH1 || (fm?.byKey.get("title") as string) || fileTitle || ulid;
 
   const tq = ctx?.tokenQuery ?? "";
-  // Strip a leading H1 that duplicates the title — otherwise the page renders
-  // its title twice (once from <h1> below, once from the markdown's own # heading).
-  const dedupedBody = rawBody.replace(
-    /^\s*#\s+(.+?)\s*$/m,
-    (match, heading: string) =>
-      heading.trim().toLowerCase() === title.trim().toLowerCase() ? "" : match
-  );
+  // Always strip the body's leading H1 — we always render `title` ourselves
+  // below, so leaving the original would duplicate. (Previously this only
+  // stripped on exact match, which left a stray H1 whenever the file's
+  // basename and the body's heading differed by a prefix.)
+  const dedupedBody = bodyH1Match
+    ? rawBody.replace(bodyH1Match[0], "")
+    : rawBody;
   // Image extensions Obsidian recognises in embeds — used for both ![[…]] and ![](…) forms
   const IMG_EXT = /\.(png|jpe?g|gif|svg|webp|avif|bmp)$/i;
   const assetUrl = (filename: string): string | null => {
@@ -1830,7 +3111,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
       const t = target.trim();
       const url = assetUrl(t);
       if (url) return `<img src="${escapeAttr(url)}" alt="${escapeAttr((alias ?? t).trim())}" class="embedded-image" loading="lazy">`;
-      return `<span class="embed-missing" title="asset not in this share">📎 ${escapeHtml(t)}</span>`;
+      return `<span class="embed-missing" title="asset not in this share">[missing: ${escapeHtml(t)}]</span>`;
     }
   );
 
@@ -1863,7 +3144,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
         const canvasKey = targetTrim.replace(/\.canvas$/i, "");
         const canvasUlid = ctx.canvasSet?.get(canvasKey);
         if (canvasUlid) {
-          return `<a class="wikilink-internal wikilink-canvas" href="${ctx.shareBase}/c/${canvasUlid}${tq}" title="canvas">🗺 ${escapeHtml(label)}</a>`;
+          return `<a class="wikilink-internal wikilink-canvas" href="${ctx.shareBase}/c/${canvasUlid}${tq}" title="canvas">${escapeHtml(label)}</a>`;
         }
       }
       return `<span class="wikilink-private" title="not in this published slice">${escapeHtml(label)}</span>`;
@@ -1909,45 +3190,681 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
       canvases: ctx.wrapTree.canvases,
       hasSidebar: true,
     });
-    return shell({ title, sidebarLayout: true, body: `
+    const backlinksHtml = renderBacklinks(ctx);
+    const folderNavHtml = renderFolderNav(ctx);
+    // OG / Twitter card metadata. The og.svg endpoint inherits the token from
+    // the page (same gate semantics) — so previews work for whoever already
+    // has the share link and fail for everyone else, which is exactly the
+    // privacy posture of gated shares.
+    const wrapTitle = ctx.wrapTree?.wrapTitle ?? "";
+    const ogImage = `${ctx.shareBase}/${ulid}/og.svg${tq}`;
+    const noteBody = md.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/^#[^\n]*\n/, "").trim();
+    const noteExcerpt = noteBody.replace(/[#*_`[\]]/g, "").replace(/\s+/g, " ").slice(0, 160).trim();
+    const ogDesc = noteExcerpt || (wrapTitle ? `From the "${wrapTitle}" brain share` : "Published via BrainShare");
+    const pageUrl = `${ctx.shareBase}/${ulid}`;
+    // Reading time and word count — strip frontmatter, count words, divide by 200 wpm
+    const bodyForCount = md.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/[#*_`[\]]/g, "");
+    const wordCount = (bodyForCount.match(/\b\w+\b/g) ?? []).length;
+    const readMinutes = Math.max(1, Math.round(wordCount / 200));
+    const readingMeta = `<div class="note-reading-meta"><span class="rmeta-time">${readMinutes} min read</span><span class="rmeta-sep">·</span><span class="rmeta-words">${wordCount.toLocaleString()} words</span></div>`;
+    return shell({ title, sidebarLayout: true, meta: { ogImage, ogTitle: title, ogDescription: ogDesc, pageUrl }, body: `
 ${sidebar}
 <main class="wrap-main">
   <article class="prose">
     ${breadcrumb}
-    ${props}
+    ${renderNoteActions()}
     <h1>${escapeHtml(title)}</h1>
+    ${readingMeta}
+    ${props}
     ${html}
+    ${backlinksHtml}
+    ${folderNavHtml}
   </article>
   ${tail}
 </main>
 ${SIDEBAR_TOGGLE_JS}
+${NOTE_ACTIONS_JS}
+${STICKINESS_JS}
+${READ_PROGRESS_JS}
+${WIKILINK_PREVIEW_JS}
+${NOTE_TOC_JS}
 ${palette}
 ` });
   }
 
+  // Reading time and word count — strip frontmatter, count words, divide by 200 wpm
+  const bodyForCount = md.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/[#*_`[\]]/g, "");
+  const wordCount = (bodyForCount.match(/\b\w+\b/g) ?? []).length;
+  const readMinutes = Math.max(1, Math.round(wordCount / 200));
+  const readingMeta = `<div class="note-reading-meta"><span class="rmeta-time">${readMinutes} min read</span><span class="rmeta-sep">·</span><span class="rmeta-words">${wordCount.toLocaleString()} words</span></div>`;
   return shell({ title, body: `
 ${breadcrumb}
-${props}
 <h1>${escapeHtml(title)}</h1>
+${readingMeta}
+${props}
 ${html}
 ${tail}
+${STICKINESS_JS}
 ` });
 }
 
-// Loaded only on pages that contain ```mermaid``` blocks. Converts <pre><code class="language-mermaid">
-// to mermaid divs and runs the renderer. Theme follows the page's color scheme.
+// Loaded only on pages that contain ```mermaid``` blocks. Converts
+// <pre><code class="language-mermaid"> into a styled host with a click-to-expand
+// fullscreen viewer (pan + zoom + ESC to close). Inline diagrams render at
+// native size with horizontal scroll; the modal lets the user actually read
+// wide sequence diagrams without squinting.
 const MERMAID_BOOTSTRAP = `<script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
-const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default", securityLevel: "loose" });
+// Always use the default (light) theme. We don't switch to "dark" based on
+// prefers-color-scheme because the SVG render is one-shot — if the user
+// toggles their OS theme later, the SVG colours can't update, which makes
+// the diagram unreadable on the new background. The .mermaid-host /
+// .mermaid-modal-stage CSS pins the surrounding background to white in
+// both light and dark mode to match.
+mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+
+// Pull a human-readable label from the diagram source. Mermaid sources commonly
+// open with a directive line like "sequenceDiagram" / "graph TD" / "flowchart LR";
+// the most useful title is usually the first non-directive non-empty line, which
+// is often the diagram's first node label or a "%% comment" header.
+function diagramTitle(src) {
+  const lines = src.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return "Diagram";
+  const directive = /^(sequenceDiagram|graph\\b|flowchart\\b|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|xychart\\b)/i;
+  for (const line of lines) {
+    if (line.startsWith("%%")) {
+      const cleaned = line.replace(/^%%\\s*/, "").slice(0, 80);
+      if (cleaned) return cleaned;
+    }
+    if (!directive.test(line)) return line.slice(0, 80);
+  }
+  return lines[0].slice(0, 80);
+}
+
+// 1) Replace <pre><code class="language-mermaid"> blocks with .mermaid-host > .mermaid
 document.querySelectorAll("pre > code.language-mermaid").forEach((el) => {
   const code = el.textContent;
-  const div = document.createElement("div");
-  div.className = "mermaid";
-  div.textContent = code;
-  el.parentElement.replaceWith(div);
+  const host = document.createElement("div");
+  host.className = "mermaid-host";
+  host.dataset.title = diagramTitle(code);
+  const inner = document.createElement("div");
+  inner.className = "mermaid";
+  inner.textContent = code;
+  host.appendChild(inner);
+  const actions = document.createElement("div");
+  actions.className = "mermaid-actions";
+  actions.innerHTML = '<button class="mermaid-btn" type="button" title="Open in viewer (or click the diagram)" aria-label="Open in viewer">⛶</button>';
+  host.appendChild(actions);
+  el.parentElement.replaceWith(host);
 });
-mermaid.run().catch(e => console.warn("mermaid:", e));
+
+// 2) Render
+await mermaid.run().catch(e => console.warn("mermaid:", e));
+
+// 3) Wire up click-to-expand on each rendered host
+const modal = (() => {
+  const m = document.createElement("div");
+  m.className = "mermaid-modal";
+  m.innerHTML = \`
+    <div class="mermaid-modal-bar">
+      <div class="mermaid-modal-title"></div>
+      <div class="mermaid-controls">
+        <button data-act="out" title="Zoom out (–)">−</button>
+        <button data-act="in" title="Zoom in (+)">+</button>
+        <button data-act="fit" title="Fit to screen (F)">⛶ Fit</button>
+        <button data-act="reset" title="Reset (R)">⌖ 1:1</button>
+        <button data-act="close" title="Close (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="mermaid-modal-stage"></div>
+    <div class="mermaid-modal-hint">Scroll to zoom · drag to pan · Esc to close</div>
+  \`;
+  document.body.appendChild(m);
+  return m;
+})();
+const stage = modal.querySelector(".mermaid-modal-stage");
+
+let scale = 1, tx = 0, ty = 0, currentSvg = null;
+function applyTransform() {
+  if (currentSvg) currentSvg.style.transform = \`translate(\${tx}px,\${ty}px) scale(\${scale})\`;
+}
+function fit() {
+  if (!currentSvg) return;
+  const bb = currentSvg.getBoundingClientRect();
+  // Read intrinsic size from viewBox or width/height attributes
+  const vb = currentSvg.viewBox && currentSvg.viewBox.baseVal;
+  const w = (vb && vb.width) || currentSvg.getBBox().width || bb.width;
+  const h = (vb && vb.height) || currentSvg.getBBox().height || bb.height;
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const pad = 40;
+  scale = Math.min((sw - pad) / w, (sh - pad) / h, 4);
+  if (!isFinite(scale) || scale <= 0) scale = 1;
+  tx = (sw - w * scale) / 2;
+  ty = (sh - h * scale) / 2;
+  applyTransform();
+}
+function open(svg, title) {
+  // Clone so the inline diagram keeps its own copy
+  const clone = svg.cloneNode(true);
+  clone.removeAttribute("style");
+  stage.replaceChildren(clone);
+  currentSvg = clone;
+  modal.querySelector(".mermaid-modal-title").textContent = title || "Diagram";
+  modal.classList.add("open");
+  document.body.style.overflow = "hidden";
+  requestAnimationFrame(fit);
+}
+function close() {
+  modal.classList.remove("open");
+  document.body.style.overflow = "";
+  stage.replaceChildren();
+  currentSvg = null;
+}
+
+document.querySelectorAll(".mermaid-host").forEach((host) => {
+  const svg = host.querySelector("svg");
+  if (!svg) return;
+  const inner = host.querySelector(".mermaid");
+  const onActivate = (ev) => { ev.preventDefault(); open(svg, host.dataset.title || ""); };
+  inner.addEventListener("click", onActivate);
+  host.querySelector(".mermaid-btn")?.addEventListener("click", onActivate);
+});
+
+// Modal interactions
+modal.querySelector(".mermaid-controls").addEventListener("click", (e) => {
+  const act = e.target?.dataset?.act;
+  if (!act) return;
+  if (act === "in") { scale = Math.min(scale * 1.25, 8); applyTransform(); }
+  else if (act === "out") { scale = Math.max(scale / 1.25, 0.1); applyTransform(); }
+  else if (act === "reset") { scale = 1; tx = 0; ty = 0; applyTransform(); }
+  else if (act === "fit") { fit(); }
+  else if (act === "close") { close(); }
+});
+
+stage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  const newScale = Math.max(0.1, Math.min(8, scale * factor));
+  // cursor-anchored zoom
+  tx = cx - (cx - tx) * (newScale / scale);
+  ty = cy - (cy - ty) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}, { passive: false });
+
+let dragStart = null;
+stage.addEventListener("mousedown", (e) => {
+  dragStart = { x: e.clientX - tx, y: e.clientY - ty };
+  stage.classList.add("dragging");
+});
+window.addEventListener("mousemove", (e) => {
+  if (!dragStart) return;
+  tx = e.clientX - dragStart.x;
+  ty = e.clientY - dragStart.y;
+  applyTransform();
+});
+window.addEventListener("mouseup", () => {
+  dragStart = null;
+  stage.classList.remove("dragging");
+});
+
+// Touch pan + pinch
+let touchStart = null;
+stage.addEventListener("touchstart", (e) => {
+  if (e.touches.length === 1) {
+    touchStart = { type: "pan", x: e.touches[0].clientX - tx, y: e.touches[0].clientY - ty };
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    touchStart = { type: "pinch", dist: Math.hypot(dx, dy), scale };
+  }
+}, { passive: true });
+stage.addEventListener("touchmove", (e) => {
+  if (!touchStart) return;
+  if (touchStart.type === "pan" && e.touches.length === 1) {
+    tx = e.touches[0].clientX - touchStart.x;
+    ty = e.touches[0].clientY - touchStart.y;
+    applyTransform();
+  } else if (touchStart.type === "pinch" && e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    scale = Math.max(0.1, Math.min(8, touchStart.scale * dist / touchStart.dist));
+    applyTransform();
+  }
+  e.preventDefault();
+}, { passive: false });
+stage.addEventListener("touchend", () => { touchStart = null; });
+
+// Keyboard
+window.addEventListener("keydown", (e) => {
+  if (!modal.classList.contains("open")) return;
+  if (e.key === "Escape") close();
+  else if (e.key === "+" || e.key === "=") { scale = Math.min(scale * 1.25, 8); applyTransform(); }
+  else if (e.key === "-") { scale = Math.max(scale / 1.25, 0.1); applyTransform(); }
+  else if (e.key.toLowerCase() === "f") fit();
+  else if (e.key.toLowerCase() === "r") { scale = 1; tx = 0; ty = 0; applyTransform(); }
+});
+
+// Click backdrop to close
+modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+</script>`;
+
+// Action row shown above every note's H1. Subtle ghost buttons — search,
+// copy-link, theme toggle. Wired up by NOTE_ACTIONS_JS at the bottom of the
+// page so we don't pay client-script cost until the user actually interacts.
+function renderNoteActions(): string {
+  return `<div class="note-actions" data-note-actions>
+    <button class="note-action-btn" data-action="search" title="Search this share (⌘K)">
+      <span>Search</span>
+    </button>
+    <button class="note-action-btn" data-action="copy-link" title="Copy a link to this note">
+      <span>Copy link</span>
+    </button>
+    <button class="note-action-btn" data-action="copy-md" title="Copy the note's source as Markdown">
+      <span>Copy as Markdown</span>
+    </button>
+  </div>`;
+}
+
+const NOTE_ACTIONS_JS = `<script>
+(function(){
+  var row = document.querySelector("[data-note-actions]");
+  if (!row) return;
+  function flash(btn, ok, msg) {
+    var label = btn.querySelector("span:last-child");
+    if (!label) return;
+    var original = label.textContent;
+    label.textContent = msg || (ok ? "Copied!" : "Failed");
+    btn.dataset.flash = ok ? "ok" : "err";
+    setTimeout(function(){ label.textContent = original; delete btn.dataset.flash; }, 1400);
+  }
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // Fallback for older browsers / non-https
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e2) {}
+      document.body.removeChild(ta);
+      return ok;
+    }
+  }
+  row.addEventListener("click", async function(ev){
+    var btn = ev.target.closest && ev.target.closest("[data-action]");
+    if (!btn) return;
+    var action = btn.dataset.action;
+    if (action === "search") {
+      if (window.__brainshareOpenPalette) window.__brainshareOpenPalette();
+      return;
+    }
+    if (action === "copy-link") {
+      var ok = await copy(window.location.href);
+      flash(btn, ok);
+      return;
+    }
+    if (action === "copy-md") {
+      // Use the full current URL so the scoped route handles ?raw=1 correctly.
+      var rawHref = window.location.href;
+      var sep = rawHref.indexOf("?") >= 0 ? "&" : "?";
+      var rawUrl = rawHref + sep + "raw=1";
+      // Safari requires ClipboardItem + Promise to keep the user-gesture alive
+      // across an async fetch. Without this pattern, Safari rejects the write
+      // after the await because it considers the gesture "consumed".
+      if (navigator.clipboard && window.ClipboardItem) {
+        var blobPromise = fetch(rawUrl)
+          .then(function(r){ if(!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+          .then(function(t){ return new Blob([t], {type:"text/plain"}); });
+        try {
+          await navigator.clipboard.write([new ClipboardItem({"text/plain": blobPromise})]);
+          flash(btn, true, "Copied!");
+        } catch(e) {
+          flash(btn, false, "Failed");
+        }
+        return;
+      }
+      // Fallback path for browsers without ClipboardItem support
+      try {
+        var resp = await fetch(rawUrl);
+        if (!resp.ok) { flash(btn, false, "Fetch " + resp.status); return; }
+        var text = await resp.text();
+        var ok = await copy(text);
+        flash(btn, ok, ok ? "Copied " + text.length + " chars" : "Failed");
+      } catch (e) {
+        flash(btn, false, "Network error");
+      }
+      return;
+    }
+  });
+})();
+</script>`;
+
+const READ_PROGRESS_JS = `<script>
+(function(){
+  var bar = document.createElement('div');
+  bar.className = 'read-progress';
+  document.body.appendChild(bar);
+  function update(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    if (max <= 0) { bar.style.width = '0'; return; }
+    var pct = Math.min(100, Math.max(0, (h.scrollTop || document.body.scrollTop) / max * 100));
+    bar.style.width = pct + '%';
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  update();
+})();
+</script>`;
+
+const STICKINESS_JS = `<script>
+(function(){
+  var STORAGE_VISITED = 'brainshare_visited_v1';
+  var STORAGE_LAST_VISIT = 'brainshare_last_visit_v1';
+  function safeGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+  function safeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+
+  // Decode ULID's leading 10 chars to a unix ms timestamp.
+  // Crockford base32: 0123456789ABCDEFGHJKMNPQRSTVWXYZ
+  var ULID_ALPHA = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  function ulidTime(ulid){
+    if (!ulid || ulid.length < 10) return 0;
+    var t = 0;
+    for (var i = 0; i < 10; i++) {
+      var c = ulid.charAt(i).toUpperCase();
+      var v = ULID_ALPHA.indexOf(c);
+      if (v < 0) return 0;
+      t = t * 32 + v;
+    }
+    return t;
+  }
+
+  // Visited-set: JSON array of ULIDs (cap at 500 to bound storage)
+  function getVisited(){
+    try { return JSON.parse(safeGet(STORAGE_VISITED) || '[]'); }
+    catch(e) { return []; }
+  }
+  function markVisited(ulid){
+    if (!ulid) return;
+    var list = getVisited();
+    if (list.indexOf(ulid) >= 0) return;
+    list.push(ulid);
+    if (list.length > 500) list = list.slice(-500);
+    safeSet(STORAGE_VISITED, JSON.stringify(list));
+  }
+
+  // Detect if we're on a note page (path has /share/:id/:ulid)
+  var ulidMatch = location.pathname.match(/\\/share\\/[^/]+\\/([0-9A-HJKMNP-TV-Z]{26})$/);
+  if (ulidMatch) {
+    markVisited(ulidMatch[1]);
+  }
+
+  // On landing page, apply read-state + new-since-visit classes to tiles
+  var noteLinks = document.querySelectorAll('.note-list a[data-ulid]');
+  if (noteLinks.length > 0) {
+    var visited = getVisited();
+    var visitedSet = {};
+    for (var i = 0; i < visited.length; i++) visitedSet[visited[i]] = true;
+    var lastVisit = parseInt(safeGet(STORAGE_LAST_VISIT) || '0', 10);
+    var hasNew = false;
+    noteLinks.forEach(function(a){
+      var ulid = a.getAttribute('data-ulid');
+      if (!ulid) return;
+      if (visitedSet[ulid]) a.classList.add('is-read');
+      if (lastVisit > 0 && ulidTime(ulid) > lastVisit) {
+        a.classList.add('is-new');
+        hasNew = true;
+      }
+    });
+    // Update last-visit AFTER applying classes (next visit will compare against now)
+    safeSet(STORAGE_LAST_VISIT, String(Date.now()));
+  }
+
+  // Also apply read-state in the sidebar tree on note pages
+  var treeLinks = document.querySelectorAll('.tree-file[data-ulid]');
+  if (treeLinks.length > 0) {
+    var visited2 = getVisited();
+    var vs2 = {};
+    for (var j = 0; j < visited2.length; j++) vs2[visited2[j]] = true;
+    treeLinks.forEach(function(a){
+      var u = a.getAttribute('data-ulid');
+      if (u && vs2[u]) a.classList.add('is-read');
+    });
+  }
+})();
+</script>`;
+
+const WIKILINK_PREVIEW_JS = `<script>
+(function(){
+  var cache = {};            // href -> { title, body }
+  var pending = {};          // href -> Promise (dedupe in-flight requests)
+  var popover = null;
+  var showTimer = null;
+  var hideTimer = null;
+  var currentAnchor = null;
+
+  function ensurePopover(){
+    if (popover) return popover;
+    popover = document.createElement('div');
+    popover.className = 'wikilink-preview';
+    document.body.appendChild(popover);
+    popover.addEventListener('mouseenter', function(){
+      // Keep open if mouse moves into popover
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    });
+    popover.addEventListener('mouseleave', function(){ hide(); });
+    return popover;
+  }
+
+  function extractTitle(md){
+    // First H1 in body wins, else first non-empty line
+    var stripped = md.replace(/^---[\\s\\S]*?\\n---\\s*\\n/, '');
+    var h1 = stripped.match(/^\\s*#\\s+(.+?)\\s*$/m);
+    if (h1) return h1[1].trim();
+    var firstLine = stripped.split('\\n').find(function(l){ return l.trim().length > 0; });
+    return firstLine ? firstLine.trim().slice(0, 80) : '';
+  }
+  function extractBody(md){
+    var stripped = md.replace(/^---[\\s\\S]*?\\n---\\s*\\n/, '').replace(/^#[^\\n]*\\n/, '').trim();
+    return stripped.replace(/[#*_\`\\[\\]]/g, '').replace(/\\s+/g, ' ').slice(0, 280);
+  }
+
+  function fetchExcerpt(href){
+    // href like /share/:wrapId/:ulid?t=JWT — append &raw=1 (or ?raw=1)
+    var sep = href.indexOf('?') >= 0 ? '&' : '?';
+    var url = href + sep + 'raw=1';
+    if (pending[href]) return pending[href];
+    pending[href] = fetch(url).then(function(r){
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.text();
+    }).then(function(md){
+      var entry = { title: extractTitle(md), body: extractBody(md) };
+      cache[href] = entry;
+      delete pending[href];
+      return entry;
+    }).catch(function(e){
+      delete pending[href];
+      throw e;
+    });
+    return pending[href];
+  }
+
+  function position(anchor){
+    var rect = anchor.getBoundingClientRect();
+    var pop = ensurePopover();
+    var pw = pop.offsetWidth || 280;
+    var ph = pop.offsetHeight || 100;
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var top = (spaceBelow >= ph + 12 || rect.top < ph + 12)
+      ? rect.bottom + window.scrollY + 6
+      : rect.top + window.scrollY - ph - 6;
+    var left = rect.left + window.scrollX;
+    // Clamp horizontally to viewport
+    var maxLeft = window.scrollX + window.innerWidth - pw - 8;
+    if (left > maxLeft) left = maxLeft;
+    if (left < window.scrollX + 8) left = window.scrollX + 8;
+    pop.style.top = top + 'px';
+    pop.style.left = left + 'px';
+  }
+
+  function render(entry){
+    var pop = ensurePopover();
+    var titleHtml = entry.title ? '<div class="wikilink-preview-title">' + escape(entry.title) + '</div>' : '';
+    var bodyHtml = entry.body ? '<div class="wikilink-preview-body">' + escape(entry.body) + '</div>' : '<div class="wikilink-preview-body" style="font-style:italic;opacity:.6">No content</div>';
+    pop.innerHTML = titleHtml + bodyHtml;
+  }
+
+  function escape(s){
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function show(anchor){
+    var href = anchor.getAttribute('href');
+    if (!href) return;
+    currentAnchor = anchor;
+    var pop = ensurePopover();
+    if (cache[href]) {
+      render(cache[href]);
+      position(anchor);
+      pop.classList.add('visible');
+      return;
+    }
+    // Loading state
+    pop.innerHTML = '<div class="wikilink-preview-body" style="font-style:italic;opacity:.6">Loading…</div>';
+    position(anchor);
+    pop.classList.add('visible');
+    fetchExcerpt(href).then(function(entry){
+      if (currentAnchor !== anchor) return;
+      render(entry);
+      position(anchor);
+    }).catch(function(){
+      if (currentAnchor !== anchor) return;
+      pop.innerHTML = '<div class="wikilink-preview-body" style="font-style:italic;opacity:.5">Preview unavailable</div>';
+    });
+  }
+
+  function hide(){
+    if (popover) popover.classList.remove('visible');
+    currentAnchor = null;
+  }
+
+  document.addEventListener('mouseover', function(ev){
+    var a = ev.target.closest && ev.target.closest('a.wikilink-internal');
+    if (!a) return;
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    if (showTimer) clearTimeout(showTimer);
+    showTimer = setTimeout(function(){ show(a); }, 320);
+  });
+  document.addEventListener('mouseout', function(ev){
+    var a = ev.target.closest && ev.target.closest('a.wikilink-internal');
+    if (!a) return;
+    if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+    hideTimer = setTimeout(hide, 180);
+  });
+})();
+</script>`;
+
+// "Notes that link here" — Obsidian's backlinks pane, rendered as a section
+// after the article body. Quietly omitted when there are no inbound links.
+function renderBacklinks(ctx: RenderCtx | undefined): string {
+  const links = ctx?.backlinks ?? [];
+  if (!links.length) return "";
+  const shareBase = ctx?.shareBase ?? "";
+  const tq = ctx?.tokenQuery ?? "";
+  const items = links
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((b) => {
+      const folder = b.path.includes("/") ? b.path.split("/").slice(0, -1).join("/") : "";
+      const folderHint = folder ? `<span class="backlink-folder">${escapeHtml(folder)}</span>` : "";
+      return `<li><a href="${shareBase}/${b.ulid}${tq}"><span class="backlink-title">${escapeHtml(b.title)}</span>${folderHint}</a></li>`;
+    })
+    .join("");
+  return `<aside class="note-backlinks" aria-labelledby="backlinks-heading">
+    <h2 id="backlinks-heading" class="note-backlinks-heading">
+      Notes that link here <span class="backlinks-count">${links.length}</span>
+    </h2>
+    <ul class="note-backlinks-list">${items}</ul>
+  </aside>`;
+}
+
+// Prev / next navigation within the current folder. Lets readers walk a multi-
+// part series in order without bouncing through the landing every time.
+function renderFolderNav(ctx: RenderCtx | undefined): string {
+  const nav = ctx?.folderNav;
+  if (!nav || (!nav.prev && !nav.next)) return "";
+  const shareBase = ctx?.shareBase ?? "";
+  const tq = ctx?.tokenQuery ?? "";
+  const prev = nav.prev
+    ? `<a class="folder-nav-link folder-nav-prev" href="${shareBase}/${nav.prev.ulid}${tq}">
+        <span class="folder-nav-dir">← Previous</span>
+        <span class="folder-nav-title">${escapeHtml(nav.prev.title)}</span>
+      </a>`
+    : `<span class="folder-nav-placeholder"></span>`;
+  const next = nav.next
+    ? `<a class="folder-nav-link folder-nav-next" href="${shareBase}/${nav.next.ulid}${tq}">
+        <span class="folder-nav-dir">Next →</span>
+        <span class="folder-nav-title">${escapeHtml(nav.next.title)}</span>
+      </a>`
+    : `<span class="folder-nav-placeholder"></span>`;
+  return `<nav class="folder-nav" aria-label="Folder navigation">${prev}${next}</nav>`;
+}
+
+// Auto-TOC: builds a sticky right-rail of <h2>/<h3> anchors from the article.
+// Pure client script — does nothing on notes with ≤2 headings. Runs after
+// paint so it doesn't block first contentful render.
+const NOTE_TOC_JS = `<script>
+(function(){
+  var article = document.querySelector("article.prose");
+  if (!article) return;
+  var heads = article.querySelectorAll("h2, h3");
+  if (heads.length < 3) return;
+  // Assign stable ids
+  var seen = {};
+  function slug(text) {
+    var s = (text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!s) s = "section";
+    var base = s, i = 1;
+    while (seen[s]) { s = base + "-" + (++i); }
+    seen[s] = true;
+    return s;
+  }
+  var items = [];
+  heads.forEach(function(h){
+    if (!h.id) h.id = slug(h.textContent);
+    items.push({ id: h.id, text: h.textContent || "", level: h.tagName === "H3" ? 3 : 2 });
+  });
+  var toc = document.createElement("nav");
+  toc.className = "note-toc";
+  toc.setAttribute("aria-label", "On this page");
+  var html = '<div class="note-toc-title">On this page</div><ol class="note-toc-list">';
+  items.forEach(function(it){
+    html += '<li class="note-toc-item note-toc-l' + it.level + '"><a href="#' + it.id + '">' + (it.text.replace(/</g, "&lt;")) + '</a></li>';
+  });
+  html += '</ol>';
+  toc.innerHTML = html;
+  article.parentElement.appendChild(toc);
+  // Highlight the section currently in view
+  if (typeof IntersectionObserver !== "undefined") {
+    var links = {};
+    toc.querySelectorAll("a").forEach(function(a){ links[a.getAttribute("href").slice(1)] = a; });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        var a = links[e.target.id];
+        if (!a) return;
+        if (e.isIntersecting) a.classList.add("active"); else a.classList.remove("active");
+      });
+    }, { rootMargin: "-40% 0px -55% 0px" });
+    heads.forEach(function(h){ io.observe(h); });
+  }
+})();
 </script>`;
 
 function renderBreadcrumb(ctx: RenderCtx | undefined, title: string): string {
@@ -1977,25 +3894,65 @@ function renderBreadcrumb(ctx: RenderCtx | undefined, title: string): string {
   const badge = !scoped
     ? `<span class="scope-badge">standalone</span>`
     : ctx?.gated
-      ? `<span class="scope-badge gated-badge">🔒 gated</span>`
+      ? `<span class="scope-badge gated-badge">gated</span>`
       : `<span class="scope-badge">scoped to share</span>`;
   return `<div class="breadcrumb">${back}${folderPart}<span>${escapeHtml(title)}</span>${badge}</div>`;
 }
 
-function renderProperties(fm: Frontmatter | null, ulid: string): string {
-  if (!fm) {
-    return `<div class="properties"><h2>Properties</h2><div class="prop-row"><span class="prop-key">${PROP_ICON.id}id</span><span class="prop-val"><code>${ulid}</code></span></div></div>`;
+/**
+ * Compact inline chips shown right under the action row — surfaces tags and
+ * status (the highest-signal frontmatter fields) so a reader can scan them at
+ * a glance without expanding the full properties panel. Empty when there's
+ * nothing useful to show.
+ */
+function renderInlineMeta(fm: Frontmatter | null): string {
+  if (!fm) return "";
+  const chips: string[] = [];
+  const tags = fm.byKey.get("tags");
+  if (Array.isArray(tags)) {
+    for (const t of tags) chips.push(`<span class="meta-chip meta-chip-tag">#${escapeHtml(String(t))}</span>`);
   }
-  const rows = fm.fields.map(({ key, value }) => {
-    const icon = PROP_ICON[key] ?? PROP_ICON.default;
-    const valHtml = renderFmValue(key, value);
-    return `<div class="prop-row"><span class="prop-key">${icon}${escapeHtml(key)}</span><span class="prop-val">${valHtml}</span></div>`;
-  });
+  const status = fm.byKey.get("status");
+  if (typeof status === "string" && status.trim()) {
+    chips.push(`<span class="meta-chip meta-chip-status">${escapeHtml(status)}</span>`);
+  }
+  if (!chips.length) return "";
+  return `<div class="note-meta-chips">${chips.join("")}</div>`;
+}
+
+/**
+ * Full properties table. Rendered as a `<details>` element collapsed by
+ * default — the article must NOT be buried under 10 rows of frontmatter
+ * metadata. The summary line shows the count so readers know it's there
+ * without it dominating the viewport.
+ *
+ * Placement: AFTER the article body, before backlinks. The agent + power-user
+ * audience that cares about properties can expand them; everyone else reads
+ * the note first.
+ */
+function renderProperties(fm: Frontmatter | null, ulid: string): string {
+  const rows: string[] = [];
+  if (fm) {
+    for (const { key, value } of fm.fields) {
+      const icon = PROP_ICON[key] ?? PROP_ICON.default;
+      const valHtml = renderFmValue(key, value);
+      rows.push(`<div class="prop-row"><span class="prop-key">${icon}${escapeHtml(key)}</span><span class="prop-val">${valHtml}</span></div>`);
+    }
+  }
   // ensure id is always in the panel (even if absent from frontmatter)
-  if (!fm.byKey.has("id")) {
+  if (!fm || !fm.byKey.has("id")) {
     rows.push(`<div class="prop-row"><span class="prop-key">${PROP_ICON.id}id</span><span class="prop-val"><code>${ulid}</code></span></div>`);
   }
-  return `<div class="properties"><h2>Properties</h2>${rows.join("")}</div>`;
+  const count = rows.length;
+  // open by default — mimics Notion's properties-at-top behaviour. Reader can
+  // collapse with one click. State is per-page-load (native <details>; no JS).
+  return `<details class="properties" open>
+    <summary class="properties-summary">
+      <span class="properties-summary-label">Properties</span>
+      <span class="properties-summary-count">${count}</span>
+    </summary>
+    <div class="properties-body">${rows.join("")}</div>
+  </details>`;
 }
 
 function renderFmValue(key: string, value: FmValue): string {
@@ -2057,14 +4014,58 @@ export async function renderWrapper(
   const folderSections = folderOrder.map((folder) => {
     const slug = folder ? folder.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "root";
     const heading = folder
-      ? `<h3 class="folder-heading" id="folder-${slug}"><span class="folder-icon">📁</span>${escapeHtml(folder)} <span class="folder-count">${groups.get(folder)!.length}</span></h3>`
-      : `<h3 class="folder-heading" id="folder-root"><span class="folder-icon">·</span>vault root <span class="folder-count">${groups.get(folder)!.length}</span></h3>`;
+      ? `<h3 class="folder-heading" id="folder-${slug}"><span class="folder-icon"></span>${escapeHtml(folder)}<span class="folder-count">${groups.get(folder)!.length}</span></h3>`
+      : `<h3 class="folder-heading" id="folder-root"><span class="folder-icon"></span>vault root<span class="folder-count">${groups.get(folder)!.length}</span></h3>`;
     const lis = groups.get(folder)!.map((r) => {
       const cls = r.md ? "" : "missing";
-      return `<li class="${cls}"><a href="${shareBase}/${r.ulid}${tq}"><span class="title">${escapeHtml(r.title)}</span><span class="ulid">${r.ulid}</span></a></li>`;
+      return `<li class="${cls}"><a href="${shareBase}/${r.ulid}${tq}" title="${r.ulid}" data-ulid="${r.ulid}"><span class="title">${escapeHtml(r.title)}</span></a></li>`;
     });
     return `${heading}<ul class="note-list">${lis.join("")}</ul>`;
   });
+
+  // Recently updated — top 6 notes by ULID timestamp (newest first)
+  const recentRecords = [...records]
+    .filter(r => r.md) // skip missing/private notes
+    .sort((a, b) => b.ulid.localeCompare(a.ulid))
+    .slice(0, 6);
+  function ulidToDate(u: string): string {
+    // Decode first 10 chars as Crockford base32 timestamp
+    const alpha = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let t = 0;
+    for (let i = 0; i < 10; i++) {
+      const v = alpha.indexOf(u.charAt(i).toUpperCase());
+      if (v < 0) return "";
+      t = t * 32 + v;
+    }
+    const d = new Date(t);
+    return d.toISOString().slice(0, 10);
+  }
+  function noteExcerpt(md: string): string {
+    const body = md.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/^#[^\n]*\n/, "").trim();
+    return body.replace(/[#*_`[\]>]/g, "").replace(/\s+/g, " ").slice(0, 110).trim();
+  }
+  function noteFolder(p: string): string {
+    if (!p.includes("/")) return "vault root";
+    return p.split("/").slice(0, -1).join(" / ");
+  }
+  function noteWordCount(md: string): number {
+    const body = md.replace(/^---[\s\S]*?\n---\s*\n/, "");
+    return (body.match(/\b\w+\b/g) ?? []).length;
+  }
+  const recentHtml = recentRecords.length > 0
+    ? `<section class="recently-updated"><h2 class="recently-updated-heading">Recently updated</h2><ul class="recently-updated-list-v2">${
+        recentRecords.slice(0, 4).map(r => {
+          const folder = noteFolder(r.path);
+          const wc = noteWordCount(r.md ?? "");
+          const minutes = Math.max(1, Math.round(wc / 200));
+          return `<li><a href="${shareBase}/${r.ulid}${tq}" data-ulid="${r.ulid}">
+          <div class="ru-card-title">${escapeHtml(r.title)}</div>
+          ${folder ? `<div class="ru-card-folder">${escapeHtml(folder)}</div>` : ""}
+          <div class="ru-card-meta"><span>${ulidToDate(r.ulid)}</span><span class="ru-card-dot">·</span><span>${minutes} min</span></div>
+        </a></li>`;
+        }).join("")
+      }</ul></section>`
+    : "";
 
   // Folder breadcrumb chips at the top of the wrapper for quick navigation
   const folderChips = folderOrder
@@ -2108,6 +4109,29 @@ export async function renderWrapper(
     hasSidebar: true,
   });
 
+  const authorLine = wrap.author
+    ? `<div class="wrap-hero-byline">by <span class="wrap-hero-author">${escapeHtml(wrap.author)}</span></div>`
+    : "";
+  const hero = `<header class="wrap-hero">
+    ${authorLine}
+    <h1 class="wrap-hero-title">${escapeHtml(wrap.title ?? "Untitled vault")}</h1>
+    ${wrap.description ? `<p class="wrap-hero-desc">${escapeHtml(wrap.description)}</p>` : ""}
+    <div class="wrap-hero-actions">
+      <button class="wrap-hero-cta wrap-hero-cta-primary" type="button" data-open-palette>
+        Explore vault <kbd>⌘K</kbd>
+      </button>
+      <a class="wrap-hero-cta wrap-hero-cta-secondary" href="${shareBase}/feed.xml${tq}" title="Subscribe via RSS/Atom for new notes">
+        Follow via RSS
+      </a>
+    </div>
+    <div class="wrap-hero-stats">
+      <span class="wrap-stat"><strong>${wrap.ulids.length}</strong> notes</span>
+      ${wrap.canvases?.length ? `<span class="wrap-stat-sep">·</span><span class="wrap-stat"><strong>${wrap.canvases.length}</strong> canvases</span>` : ""}
+      ${wrap.assets && Object.keys(wrap.assets).length ? `<span class="wrap-stat-sep">·</span><span class="wrap-stat"><strong>${Object.keys(wrap.assets).length}</strong> assets</span>` : ""}
+      ${wrap.gated ? `<span class="wrap-stat-sep">·</span><span class="gated-badge">private share</span>` : ""}
+    </div>
+  </header>`;
+
   return shell({
     title: wrap.title ?? "Shared slice",
     wide: true,
@@ -2116,19 +4140,74 @@ export async function renderWrapper(
 ${sidebar}
 
 <main class="wrap-main">
-  <div id="graph-host">
-    <span class="graph-help">drag · scroll to zoom · click a node to open · hover to focus · double-click empty space to reset</span>
-    <button id="graph-reset" class="graph-reset-btn" type="button" title="Reset view (or double-click empty space)">⌖ Reset view</button>
-    <div id="graph" style="width:100%;height:100%"></div>
+  ${hero}
+
+  ${recentHtml}
+
+  <div class="graph-wrapper" id="graph-wrapper" data-controls="open">
+    <div id="graph-host">
+      <div id="graph" style="width:100%;height:100%"></div>
+      <div class="graph-hint-bar">drag · scroll to zoom · click to open · hover to focus · dbl-click to reset</div>
+    </div>
+
+    <aside id="graph-controls-panel" class="graph-controls-panel" aria-label="Graph controls">
+      <div class="gcp-header">
+        <span>Graph</span>
+        <button id="gcp-close" class="gcp-close-btn" type="button" aria-label="Close controls panel">✕</button>
+      </div>
+
+      <div class="gcp-section">
+        <div class="gcp-section-title">Filters</div>
+        <div class="gcp-toggle-row">
+          <span class="gcp-label">Orphan nodes</span>
+          <button class="gcp-toggle active" id="ctrl-orphans" role="switch" aria-checked="true" type="button"></button>
+        </div>
+      </div>
+
+      <div class="gcp-section">
+        <div class="gcp-section-title">Display</div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Node size</span><span class="gcp-val" id="ctrl-node-size-val">1×</span></div>
+          <input type="range" id="ctrl-node-size" class="gcp-slider" min="0.3" max="3" step="0.1" value="1">
+        </div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Link thickness</span><span class="gcp-val" id="ctrl-edge-val">1×</span></div>
+          <input type="range" id="ctrl-edge-size" class="gcp-slider" min="0.5" max="4" step="0.5" value="1">
+        </div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Label density</span></div>
+          <input type="range" id="ctrl-label-density" class="gcp-slider" min="1" max="5" step="1" value="3">
+        </div>
+      </div>
+
+      <div class="gcp-section">
+        <div class="gcp-section-title">Forces</div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Repel</span><span class="gcp-val" id="ctrl-repel-val">260</span></div>
+          <input type="range" id="ctrl-repel" class="gcp-slider" min="50" max="600" step="10" value="260">
+        </div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Link distance</span><span class="gcp-val" id="ctrl-linkdist-val">80</span></div>
+          <input type="range" id="ctrl-link-dist" class="gcp-slider" min="20" max="200" step="10" value="80">
+        </div>
+        <div class="gcp-row">
+          <div class="gcp-label-row"><span class="gcp-label">Center pull</span><span class="gcp-val" id="ctrl-center-val">0.12</span></div>
+          <input type="range" id="ctrl-center" class="gcp-slider" min="0.01" max="0.4" step="0.01" value="0.12">
+        </div>
+        <button id="ctrl-apply-forces" class="gcp-apply-btn" type="button">Apply</button>
+      </div>
+
+      <div class="gcp-section">
+        <button id="graph-reset" class="gcp-reset-btn" type="button">⌖ Reset view</button>
+      </div>
+    </aside>
+
+    <button id="graph-open-controls" class="graph-open-btn" type="button" aria-label="Open graph controls">Controls</button>
   </div>
-
-  <h2 style="margin-top:1em">Notes in this slice</h2>
-  ${folderSections.join("")}
-
-  <div class="wrap-meta">${records.length} note(s)${canvasMetas.length ? ` · ${canvasMetas.length} canvas${canvasMetas.length === 1 ? "" : "es"}` : ""}${assetCount ? ` · ${assetCount} asset(s)` : ""} · created ${escapeHtml(wrap.created_at ?? "")}${wrap.gated ? " · gated" : ""}</div>
 </main>
 
 ${SIDEBAR_TOGGLE_JS}
+${STICKINESS_JS}
 ${palette}
 
 <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
@@ -2141,7 +4220,8 @@ ${palette}
 (function(){
   var DATA = ${JSON.stringify(graphData)};
   if (!DATA.nodes.length || typeof graphology === "undefined" || typeof Sigma === "undefined") {
-    document.getElementById("graph-host").style.display = "none";
+    var gw = document.getElementById("graph-wrapper");
+    if (gw) gw.style.display = "none";
     return;
   }
   var g = new graphology.Graph();
@@ -2150,13 +4230,11 @@ ${palette}
   var nodeColor  = (styles.getPropertyValue("--text-muted").trim()  || "#8a8a8a");
   var edgeColor  = (styles.getPropertyValue("--border").trim()      || "#363636");
   var labelColor = (styles.getPropertyValue("--text-normal").trim() || "#dcddde");
-  // Dim must be a flat colour (sigma's WebGL renderer ignores rgba alpha for
-  // node fills). Pick something close to the background so non-neighbours
-  // genuinely fade instead of staying half-visible.
   var bgIsDark   = matchMedia("(prefers-color-scheme: dark)").matches;
   var dimColor   = bgIsDark ? "#2a2a2a" : "#dee2e6";
+  var labelBg    = (styles.getPropertyValue("--bg-primary").trim() || (bgIsDark ? "#1e1e1e" : "#ffffff"));
 
-  // Degree → node size (Obsidian's "more links → bigger node")
+  // Degree map — used for base node sizing
   var degree = {};
   DATA.edges.forEach(function(e){
     if (e.from === e.to) return;
@@ -2164,254 +4242,263 @@ ${palette}
     degree[e.to]   = (degree[e.to]   || 0) + 1;
   });
 
-  // Build d3-force node/link arrays. d3-force is what Obsidian's graph view uses —
-  // produces clean centered layouts with disconnected components naturally drifting
-  // at the periphery instead of clumping into rings (which is what FA2 was doing here).
-  var sized = DATA.nodes.map(function(n, i){
-    var theta = (i / DATA.nodes.length) * 2 * Math.PI;
+  // Base node descriptors (no positions yet — assigned by computeLayout)
+  var baseNodes = DATA.nodes.map(function(n){
     var d = degree[n.id] || 0;
-    return {
-      id: n.id,
-      label: n.label,
-      folder: n.folder,
-      // Match Obsidian: small base node + small degree-bonus. Range 3 → 8 across the
-      // graph. Hub nodes are still distinguishable but never become 17px blobs that
-      // crowd their neighbours.
-      size: 3 + Math.min(d, 10) * 0.5,
-      x: Math.cos(theta) * 80,
-      y: Math.sin(theta) * 80,
-    };
+    return { id: n.id, label: n.label, folder: n.folder, baseSize: 3 + Math.min(d, 10) * 0.5 };
   });
   var links = DATA.edges
     .filter(function(e){ return e.from !== e.to; })
     .map(function(e){ return { source: e.from, target: e.to }; });
 
-  if (typeof d3 !== "undefined" && d3.forceSimulation) {
-    // Tuned to match Obsidian's defaults reasonably well:
-    //   - charge (repulsion): -180  → enough to push isolated nodes apart
-    //   - link distance: 50         → comfortable spacing between connected pairs
-    //   - center pull: weak (0.05)  → keeps centroid at origin without crushing layout
-    //   - collide: by node size + label gutter so labels rarely overlap
-    // Tuned for Obsidian-like spread: longer links, stronger repulsion, generous
-    // collision radius so labels have room to render without overlapping.
-    var sim = d3.forceSimulation(sized)
-      .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(80).strength(0.2))
-      .force("charge", d3.forceManyBody().strength(-260).distanceMax(700))
-      .force("center", d3.forceCenter(0, 0).strength(0.12))
-      .force("x", d3.forceX(0).strength(0.04))
-      .force("y", d3.forceY(0).strength(0.04))
-      .force("collide", d3.forceCollide().radius(function(d){ return d.size + 18; }).strength(0.95))
-      .stop();
-    var ticks = Math.max(250, Math.min(600, Math.round(140 * Math.log2(sized.length + 2))));
-    for (var t = 0; t < ticks; t++) sim.tick();
+  // Orphan detection
+  var hasEdge = {};
+  DATA.edges.forEach(function(e){ if (e.from !== e.to){ hasEdge[e.from] = true; hasEdge[e.to] = true; } });
+  var orphans = baseNodes.filter(function(n){ return !hasEdge[n.id]; }).map(function(n){ return n.id; });
+
+  // ── Layout computation ────────────────────────────────────────────────────
+  function computeLayout(repel, linkDist, center) {
+    var sized = baseNodes.map(function(n, i){
+      var theta = (i / baseNodes.length) * 2 * Math.PI;
+      return { id: n.id, size: n.baseSize, x: Math.cos(theta) * 80, y: Math.sin(theta) * 80 };
+    });
+    if (typeof d3 !== "undefined" && d3.forceSimulation) {
+      var lnkArr = links.map(function(l){ return { source: l.source, target: l.target }; });
+      var sim = d3.forceSimulation(sized)
+        .force("link", d3.forceLink(lnkArr).id(function(d){ return d.id; }).distance(linkDist).strength(0.2))
+        .force("charge", d3.forceManyBody().strength(-Math.abs(repel)).distanceMax(700))
+        .force("center", d3.forceCenter(0, 0).strength(center))
+        .force("x", d3.forceX(0).strength(0.04))
+        .force("y", d3.forceY(0).strength(0.04))
+        .force("collide", d3.forceCollide().radius(function(d){ return d.size + 18; }).strength(0.95))
+        .stop();
+      var ticks = Math.max(250, Math.min(600, Math.round(140 * Math.log2(sized.length + 2))));
+      for (var t = 0; t < ticks; t++) sim.tick();
+    }
+    var positions = sized.filter(function(d){ return isFinite(d.x) && isFinite(d.y); });
+    if (positions.length > 0) {
+      var meanX = 0, meanY = 0;
+      positions.forEach(function(d){ meanX += d.x; meanY += d.y; });
+      meanX /= positions.length; meanY /= positions.length;
+      sized.forEach(function(d){ d.x -= meanX; d.y -= meanY; });
+      var TARGET = 50;
+      var distances = positions.map(function(d){ return Math.sqrt(d.x*d.x + d.y*d.y); }).sort(function(a,b){ return a-b; });
+      var p90 = distances[Math.floor(distances.length * 0.9)] || 1;
+      var scale = TARGET / Math.max(1, p90);
+      sized.forEach(function(d){ d.x *= scale; d.y *= scale; });
+      var MAX_R = TARGET * 1.6;
+      sized.forEach(function(d){
+        var r = Math.sqrt(d.x*d.x + d.y*d.y);
+        if (r > MAX_R) { d.x = d.x / r * MAX_R; d.y = d.y / r * MAX_R; }
+      });
+    }
+    return sized;
   }
 
-  // Recenter, scale, and CLAMP outliers so the main cluster always frames in the
-  // viewport regardless of where d3-force settled disconnected components.
-  var positions = sized.filter(function(d){ return isFinite(d.x) && isFinite(d.y); });
-  if (positions.length > 0) {
-    // 1) shift centroid to origin (mean of x,y) — beats percentile midpoint for skewed layouts
-    var meanX = 0, meanY = 0;
-    positions.forEach(function(d){ meanX += d.x; meanY += d.y; });
-    meanX /= positions.length; meanY /= positions.length;
-    sized.forEach(function(d){ d.x -= meanX; d.y -= meanY; });
-
-    // 2) scale so 90th-percentile distance from origin = TARGET (so most nodes fit in [-TARGET, TARGET])
-    var TARGET = 50;
-    var distances = positions.map(function(d){ return Math.sqrt(d.x*d.x + d.y*d.y); }).sort(function(a,b){return a-b;});
-    var p90 = distances[Math.floor(distances.length * 0.9)] || 1;
-    var scale = TARGET / Math.max(1, p90);
-    sized.forEach(function(d){ d.x *= scale; d.y *= scale; });
-
-    // 3) hard-clamp extreme outliers — disconnected components may have flown 5x further
-    //    than the main cluster; without this, sigma's auto-fit shrinks the main cluster
-    //    to a corner of the viewport while wasted whitespace dominates.
-    var MAX_R = TARGET * 1.6;
-    sized.forEach(function(d){
-      var r = Math.sqrt(d.x*d.x + d.y*d.y);
-      if (r > MAX_R) {
-        d.x = d.x / r * MAX_R;
-        d.y = d.y / r * MAX_R;
-      }
-    });
-  }
-
-  // Add nodes + edges to graphology now that positions are final
-  sized.forEach(function(d){
-    g.addNode(d.id, {
-      label: d.label, x: d.x, y: d.y, size: d.size, color: nodeColor,
-    });
+  // Initial layout + graphology population
+  var positioned = computeLayout(260, 80, 0.12);
+  positioned.forEach(function(d){
+    g.addNode(d.id, { label: baseNodes.find(function(n){ return n.id === d.id; }).label,
+      x: d.x, y: d.y, size: d.size, color: nodeColor });
   });
   DATA.edges.forEach(function(e){
-    if (g.hasNode(e.from) && g.hasNode(e.to) && !g.hasEdge(e.from, e.to) && e.from !== e.to) {
+    if (g.hasNode(e.from) && g.hasNode(e.to) && !g.hasEdge(e.from, e.to) && e.from !== e.to)
       g.addEdge(e.from, e.to, { size: 1, color: edgeColor });
-    }
   });
 
-  // Background colour for the label pill — uses the page bg so labels look
-  // like they're cut out of the canvas rather than floating over a noisy
-  // background. Reads at any zoom + with neighbour clusters that overlap.
-  var labelBg = (styles.getPropertyValue("--bg-primary").trim() || (bgIsDark ? "#1e1e1e" : "#ffffff"));
-  // Custom label renderer with a filled background pill behind every label.
-  // This is the missing ingredient — sigma's default renderer just draws
-  // text, so neighbour labels and dim-node ghosts fight each other for
-  // legibility on hover. The pill gives each label its own readable surface.
+  // ── Sigma renderer ───────────────────────────────────────────────────────
   function drawLabelWithBg(context, data, settings) {
     if (!data.label) return;
-    var size = settings.labelSize;
-    var font = settings.labelFont;
-    var weight = settings.labelWeight;
+    var size = settings.labelSize, font = settings.labelFont, weight = settings.labelWeight;
     context.font = (weight || "400") + " " + size + "px " + font;
     var metrics = context.measureText(data.label);
     var PADX = 5, PADY = 3, RADIUS = 4;
-    var textX = data.x + data.size + 4;
-    var textY = data.y + size / 3;
-    // Pill background
+    var textX = data.x + data.size + 4, textY = data.y + size / 3;
     context.fillStyle = labelBg;
     context.beginPath();
-    var rx = textX - PADX;
-    var ry = data.y - size / 2 - PADY + 1;
-    var rw = metrics.width + PADX * 2;
-    var rh = size + PADY * 2;
-    if (typeof context.roundRect === "function") {
-      context.roundRect(rx, ry, rw, rh, RADIUS);
-    } else {
-      context.rect(rx, ry, rw, rh);
-    }
+    var rx = textX - PADX, ry = data.y - size / 2 - PADY + 1, rw = metrics.width + PADX * 2, rh = size + PADY * 2;
+    if (typeof context.roundRect === "function") context.roundRect(rx, ry, rw, rh, RADIUS);
+    else context.rect(rx, ry, rw, rh);
     context.fill();
-    // Text
     var col = settings.labelColor && settings.labelColor.color;
     context.fillStyle = col || labelColor;
     context.fillText(data.label, textX, textY);
   }
 
-  var renderer = new Sigma(g, document.getElementById("graph"), {
+  var n = DATA.nodes.length;
+  var graphEl = document.getElementById("graph");
+  var renderer = new Sigma(g, graphEl, {
     labelColor: { color: labelColor },
-    labelSize: 12,
-    labelWeight: "500",
-    labelRenderer: drawLabelWithBg,
-    hoverRenderer: drawLabelWithBg,
-    // Match Obsidian: only show labels for nodes that are big enough AND don't
-    // collide with each other in the label grid. At default zoom only hubs show
-    // labels; zoom in to reveal more.
-    labelDensity: DATA.nodes.length > 50 ? 0.1 : 0.4,
-    labelGridCellSize: DATA.nodes.length > 50 ? 180 : 100,
-    labelRenderedSizeThreshold: DATA.nodes.length > 50 ? 4.5 : 1,
+    labelSize: 12, labelWeight: "500",
+    labelRenderer: drawLabelWithBg, hoverRenderer: drawLabelWithBg,
+    labelDensity: n > 50 ? 0.1 : 0.4,
+    labelGridCellSize: n > 50 ? 180 : 100,
+    labelRenderedSizeThreshold: n > 50 ? 4.5 : 1,
     renderEdgeLabels: false,
     defaultEdgeColor: edgeColor,
-    minCameraRatio: 0.05,
-    maxCameraRatio: 8,
-    // zIndex lets us render the focused node + its edges on TOP of the dim ones
-    zIndex: true,
+    minCameraRatio: 0.05, maxCameraRatio: 8,
+    zIndex: true, allowInvalidContainer: true,
   });
 
-  // Reset/fit handler — bring the camera back to the default state that frames
-  // every node. Used by the explicit Reset button + double-click on empty space.
-  function resetView() {
-    var camera = renderer.getCamera();
-    if (typeof camera.animatedReset === "function") {
-      camera.animatedReset({ duration: 400 });
-    } else {
-      camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-    }
+  if (typeof ResizeObserver !== "undefined" && graphEl) {
+    var lastW = 0, lastH = 0;
+    new ResizeObserver(function(entries){
+      var r = entries[0] && entries[0].contentRect;
+      if (!r || (r.width === lastW && r.height === lastH)) return;
+      lastW = r.width; lastH = r.height;
+      try { renderer.resize(); renderer.refresh(); } catch(e){}
+    }).observe(graphEl);
   }
 
+  // ── Camera reset ─────────────────────────────────────────────────────────
+  function resetView() {
+    var cam = renderer.getCamera();
+    if (typeof cam.animatedReset === "function") cam.animatedReset({ duration: 400 });
+    else cam.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  }
   var resetBtn = document.getElementById("graph-reset");
   if (resetBtn) resetBtn.addEventListener("click", resetView);
-  // Sigma fires "doubleClickStage" when you double-click empty graph space (not a node).
   renderer.on("doubleClickStage", function(e){
-    if (e && e.preventSigmaDefault) e.preventSigmaDefault(); // suppress sigma's own double-click zoom
+    if (e && e.preventSigmaDefault) e.preventSigmaDefault();
     resetView();
   });
 
-  // Hover-focus implemented via sigma reducers — the only way to selectively
-  // FORCE labels on (for hovered + neighbours) and OFF (for the rest) without
-  // mutating graph data. The previous direct-mutation version made every other
-  // label still render at default opacity, producing the unreadable overlap the
-  // user reported. Now: hovered node grows + turns accent, its neighbours stay
-  // visible with labels, and everyone else fades to a non-distracting dim.
-  var hoveredNode = null;
-  var hoveredNeighbors = null;
-
+  // ── Hover-focus ──────────────────────────────────────────────────────────
+  var hoveredNode = null, hoveredNeighbors = null;
   renderer.setSetting("nodeReducer", function(node, data){
     var res = Object.assign({}, data);
     if (hoveredNode) {
-      if (node === hoveredNode) {
-        res.color = accent;
-        res.size = data.size * 2;
-        res.forceLabel = true;
-        res.zIndex = 2;
-      } else if (hoveredNeighbors[node]) {
-        res.color = accent;       // neighbour nodes also adopt accent so the focused cluster reads as one shape
-        res.forceLabel = true;
-        res.zIndex = 1;
-      } else {
-        res.color = dimColor;
-        res.label = "";    // hide label entirely so it can't overlap the focused cluster
-        res.zIndex = 0;
-      }
+      if (node === hoveredNode) { res.color = accent; res.size = data.size * 2; res.forceLabel = true; res.zIndex = 2; }
+      else if (hoveredNeighbors[node]) { res.color = accent; res.forceLabel = true; res.zIndex = 1; }
+      else { res.color = dimColor; res.label = ""; res.zIndex = 0; }
     }
     return res;
   });
-
   renderer.setSetting("edgeReducer", function(edge, data){
     var res = Object.assign({}, data);
     if (hoveredNode) {
       var src = g.source(edge), tgt = g.target(edge);
-      if (src === hoveredNode || tgt === hoveredNode) {
-        res.color = accent;
-        res.size = (data.size || 1) * 2.5;
-        res.zIndex = 1;
-      } else {
-        res.color = dimColor;
-        res.zIndex = 0;
-      }
+      if (src === hoveredNode || tgt === hoveredNode) { res.color = accent; res.size = (data.size||1)*2.5; res.zIndex = 1; }
+      else { res.color = dimColor; res.zIndex = 0; }
     }
     return res;
   });
-
   renderer.on("enterNode", function(p){
-    hoveredNode = p.node;
-    hoveredNeighbors = {};
-    hoveredNeighbors[p.node] = true;
+    hoveredNode = p.node; hoveredNeighbors = { [p.node]: true };
     g.forEachNeighbor(p.node, function(nb){ hoveredNeighbors[nb] = true; });
-    renderer.refresh();
-    document.body.style.cursor = "pointer";
+    renderer.refresh(); document.body.style.cursor = "pointer";
   });
   renderer.on("leaveNode", function(){
-    hoveredNode = null;
-    hoveredNeighbors = null;
-    renderer.refresh();
-    document.body.style.cursor = "";
+    hoveredNode = null; hoveredNeighbors = null;
+    renderer.refresh(); document.body.style.cursor = "";
   });
-  // Touch devices have no hover, so the focus-cluster state never activates
-  // from enterNode/leaveNode. Make tap-to-focus / second-tap-to-navigate the
-  // touch behaviour, and tapping empty stage clears focus. Mouse-primary
-  // devices keep the original "click navigates immediately" flow.
-  var isTouch = (matchMedia && matchMedia("(hover: none)").matches);
-  var navigateTo = function(node){
-    window.location = "/share/" + DATA.wrapId + "/" + node + DATA.tokenQuery;
-  };
+  var isTouch = matchMedia && matchMedia("(hover: none)").matches;
+  var navigateTo = function(node){ window.location = "/share/" + DATA.wrapId + "/" + node + DATA.tokenQuery; };
   renderer.on("clickNode", function(p){
     if (!isTouch) { navigateTo(p.node); return; }
-    if (hoveredNode === p.node) {
-      // second tap on the focused node → navigate
-      navigateTo(p.node);
-      return;
-    }
-    // first tap → focus this node + neighbours, just like enterNode does
-    hoveredNode = p.node;
-    hoveredNeighbors = {};
-    hoveredNeighbors[p.node] = true;
+    if (hoveredNode === p.node) { navigateTo(p.node); return; }
+    hoveredNode = p.node; hoveredNeighbors = { [p.node]: true };
     g.forEachNeighbor(p.node, function(nb){ hoveredNeighbors[nb] = true; });
     renderer.refresh();
   });
-  // On touch, tapping empty graph space clears the focus.
   renderer.on("clickStage", function(){
     if (!isTouch || !hoveredNode) return;
-    hoveredNode = null;
-    hoveredNeighbors = null;
+    hoveredNode = null; hoveredNeighbors = null; renderer.refresh();
+  });
+
+  // ── Graph controls panel ─────────────────────────────────────────────────
+  var wrapper = document.getElementById("graph-wrapper");
+  var nodeSizeMul = 1, edgeSizeMul = 1, showOrphans = true;
+
+  // Panel open/close
+  var closeBtn = document.getElementById("gcp-close");
+  var openBtn  = document.getElementById("graph-open-controls");
+  if (closeBtn) closeBtn.addEventListener("click", function(){ wrapper.setAttribute("data-controls","closed"); });
+  if (openBtn)  openBtn.addEventListener("click",  function(){ wrapper.setAttribute("data-controls","open"); });
+
+  // Orphan toggle
+  var orphanBtn = document.getElementById("ctrl-orphans");
+  if (orphanBtn) orphanBtn.addEventListener("click", function(){
+    showOrphans = !showOrphans;
+    orphanBtn.classList.toggle("active", showOrphans);
+    orphanBtn.setAttribute("aria-checked", String(showOrphans));
+    orphans.forEach(function(id){
+      if (g.hasNode(id)) g.setNodeAttribute(id, "hidden", !showOrphans);
+    });
     renderer.refresh();
+  });
+
+  // Node size slider
+  var nodeSizeSlider = document.getElementById("ctrl-node-size");
+  var nodeSizeVal    = document.getElementById("ctrl-node-size-val");
+  if (nodeSizeSlider) nodeSizeSlider.addEventListener("input", function(){
+    nodeSizeMul = parseFloat(this.value);
+    if (nodeSizeVal) nodeSizeVal.textContent = nodeSizeMul.toFixed(1) + "x";
+    g.forEachNode(function(id, attrs){
+      var base = baseNodes.find(function(n){ return n.id === id; });
+      if (base) g.setNodeAttribute(id, "size", base.baseSize * nodeSizeMul);
+    });
+    renderer.refresh();
+  });
+
+  // Edge thickness slider
+  var edgeSizeSlider = document.getElementById("ctrl-edge-size");
+  var edgeSizeVal    = document.getElementById("ctrl-edge-val");
+  if (edgeSizeSlider) edgeSizeSlider.addEventListener("input", function(){
+    edgeSizeMul = parseFloat(this.value);
+    if (edgeSizeVal) edgeSizeVal.textContent = edgeSizeMul.toFixed(1) + "x";
+    g.forEachEdge(function(id){ g.setEdgeAttribute(id, "size", edgeSizeMul); });
+    renderer.refresh();
+  });
+
+  // Label density slider (1=sparse … 5=dense)
+  var labelSlider = document.getElementById("ctrl-label-density");
+  if (labelSlider) labelSlider.addEventListener("input", function(){
+    var v = parseInt(this.value);
+    var densityMap  = [0,0.05,0.15,0.35,0.6,1];
+    var threshMap   = [0,5,   3.5, 2,   1,  0];
+    var gridMap     = [0,220, 160, 120, 80, 60];
+    renderer.setSetting("labelDensity",                densityMap[v]);
+    renderer.setSetting("labelRenderedSizeThreshold",  threshMap[v]);
+    renderer.setSetting("labelGridCellSize",           gridMap[v]);
+    renderer.refresh();
+  });
+
+  // Forces re-layout
+  var repelSlider   = document.getElementById("ctrl-repel");
+  var repelVal      = document.getElementById("ctrl-repel-val");
+  var linkDistSlider= document.getElementById("ctrl-link-dist");
+  var linkDistVal   = document.getElementById("ctrl-linkdist-val");
+  var centerSlider  = document.getElementById("ctrl-center");
+  var centerVal     = document.getElementById("ctrl-center-val");
+  function bindVal(slider, valEl) {
+    if (!slider) return;
+    slider.addEventListener("input", function(){ if (valEl) valEl.textContent = this.value; });
+  }
+  bindVal(repelSlider, repelVal);
+  bindVal(linkDistSlider, linkDistVal);
+  bindVal(centerSlider, centerVal);
+
+  var applyBtn = document.getElementById("ctrl-apply-forces");
+  if (applyBtn) applyBtn.addEventListener("click", function(){
+    var repel    = parseFloat(repelSlider ? repelSlider.value : "260");
+    var linkDist = parseFloat(linkDistSlider ? linkDistSlider.value : "80");
+    var center   = parseFloat(centerSlider  ? centerSlider.value  : "0.12");
+    applyBtn.textContent = "Computing...";
+    applyBtn.disabled = true;
+    setTimeout(function(){
+      var newPos = computeLayout(repel, linkDist, center);
+      newPos.forEach(function(d){
+        if (g.hasNode(d.id)) {
+          g.setNodeAttribute(d.id, "x", d.x);
+          g.setNodeAttribute(d.id, "y", d.y);
+        }
+      });
+      renderer.refresh();
+      resetView();
+      applyBtn.textContent = "Apply";
+      applyBtn.disabled = false;
+    }, 30);
   });
 })();
 </script>
@@ -2504,7 +4591,7 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
     const file = (n.file ?? "").trim();
     const basename = file.split("/").pop()?.replace(/\.md$/i, "") ?? file;
     const color = canvasColor(n.color);
-    const inner = `<div class="canvas-file-name">📄 ${escapeHtml(basename)}</div>`;
+    const inner = `<div class="canvas-file-name">${escapeHtml(basename)}</div>`;
     let href: string | null = null;
     if (ctx?.shareBase) {
       const u = ctx.shareSet?.get(basename);
@@ -2522,7 +4609,7 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
   const renderLinkCard = (n: CanvasNode) => {
     const url = n.url ?? "";
     const color = canvasColor(n.color);
-    return `<a class="canvas-card canvas-link" href="${escapeAttr(url)}" target="_blank" rel="noopener" style="${posStyle(n)};border-color:${color}">🔗 ${escapeHtml(url)}</a>`;
+    return `<a class="canvas-card canvas-link" href="${escapeAttr(url)}" target="_blank" rel="noopener" style="${posStyle(n)};border-color:${color}">${escapeHtml(url)}</a>`;
   };
 
   const renderGroupBox = (n: CanvasNode) => {
@@ -2580,7 +4667,7 @@ export function renderCanvas(json: string, ulid: string, ctx?: RenderCtx): strin
   // so paths can extend in any direction from origin 0,0), then the cards on
   // top. A single CSS transform on the stage drives both pan and zoom; this
   // is what Obsidian does internally and avoids every Safari foreignObject bug.
-  const canvasBody = `<h1 class="canvas-title">🗺 ${escapeHtml(title)}</h1>
+  const canvasBody = `<h1 class="canvas-title">${escapeHtml(title)}</h1>
 <p class="canvas-help">${canvas.nodes.length} node(s) · ${canvas.edges?.length ?? 0} edge(s)</p>
 <div class="canvas-host" id="canvas-host">
   <div class="canvas-stage" id="canvas-stage" data-vbx="${vbX}" data-vby="${vbY}" data-vbw="${vbW}" data-vbh="${vbH}">
@@ -2792,7 +4879,7 @@ export function renderGateError(message: string): string {
     title: "Access required",
     body: `
 <div class="gate-error">
-  <div class="gate-icon">🔒</div>
+  <div class="gate-icon"></div>
   <h1>Access required</h1>
   <p class="gate-msg">${escapeHtml(message)}</p>
   <p class="gate-hint">If you were given a link, make sure you used the full URL including the access token (<code>?t=…</code>). Tokens can expire, be revoked, or have a view limit.</p>
@@ -2805,26 +4892,211 @@ export function renderGateError(message: string): string {
 // Page shell
 // ─────────────────────────────────────────────────────────────────────────────
 
-function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean }): string {
+/**
+ * Render a 1200×630 OpenGraph card for a note as an SVG. Slack / Discord /
+ * Mastodon / iMessage render SVG previews directly. Twitter requires raster
+ * (the og:image URL still resolves; their bot just won't render the preview).
+ * For an MVP this trades preview-on-Twitter for an order of magnitude less
+ * complexity (no PNG renderer in the Worker).
+ *
+ * Word-wraps the title across up to three lines. Falls back to a single line
+ * if the title is short.
+ */
+export function renderOgCard(opts: {
+  title: string;
+  wrapTitle: string;
+  folder?: string;
+  wordCount?: number;
+  gated?: boolean;
+}): string {
+  const W = 1200, H = 630;
+  // Naive word-wrap. Hard-coded char budgets per line because SVG has no
+  // line-break, and computing real text widths server-side would need a font
+  // metrics table. The numbers are tuned for the 60px title font below.
+  const MAX_LINES = 3, CHARS_PER_LINE = 28;
+  const titleWords = opts.title.split(/\s+/);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of titleWords) {
+    if ((cur + " " + w).trim().length > CHARS_PER_LINE && cur) {
+      lines.push(cur);
+      cur = w;
+      if (lines.length === MAX_LINES - 1) {
+        // Pack the rest into the last line, truncating.
+        const rest = titleWords.slice(titleWords.indexOf(w)).join(" ");
+        lines.push(rest.length > CHARS_PER_LINE ? rest.slice(0, CHARS_PER_LINE - 1) + "…" : rest);
+        cur = "";
+        break;
+      }
+    } else {
+      cur = (cur + " " + w).trim();
+    }
+  }
+  if (cur) lines.push(cur);
+  const titleSvg = lines.map((line, i) =>
+    `<text x="80" y="${260 + i * 80}" font-size="64" font-weight="700" fill="#1f2328" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">${escapeHtml(line)}</text>`
+  ).join("");
+
+  const folderLine = opts.folder
+    ? `<text x="80" y="${260 + lines.length * 80 + 60}" font-size="28" fill="#57606a" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">${escapeHtml(opts.folder)}</text>`
+    : "";
+  const wordsChip = opts.wordCount
+    ? `<text x="80" y="${260 + lines.length * 80 + (opts.folder ? 110 : 60)}" font-size="22" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">${opts.wordCount.toLocaleString()} words</text>`
+    : "";
+
+  const gatedBadge = opts.gated
+    ? `<g transform="translate(${W - 220}, 60)">
+         <rect x="0" y="0" width="160" height="44" rx="22" fill="#7f6df2" opacity="0.15"/>
+         <text x="80" y="29" font-size="20" font-weight="600" fill="#5b4ad6" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">GATED</text>
+       </g>`
+    : "";
+
+  // Bottom-right corner: brand mark
+  const brand = `
+    <g transform="translate(${W - 80}, ${H - 60})">
+      <text x="0" y="0" font-size="22" font-weight="600" fill="#7f6df2" text-anchor="end" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">BrainShare</text>
+    </g>`;
+
+  // Bottom-left corner: the wrapper title (small)
+  const wrap = opts.wrapTitle
+    ? `<text x="80" y="${H - 60}" font-size="22" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">${escapeHtml(opts.wrapTitle.slice(0, 50))}${opts.wrapTitle.length > 50 ? "…" : ""}</text>`
+    : "";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f5f6f8"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7f6df2"/>
+      <stop offset="100%" stop-color="#a882ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <rect width="${W}" height="8" fill="url(#accent)"/>
+  <text x="80" y="120" font-size="24" font-weight="500" letter-spacing="2" fill="#7f6df2" font-family="-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif">BRAINSHARE</text>
+  ${gatedBadge}
+  ${titleSvg}
+  ${folderLine}
+  ${wordsChip}
+  ${wrap}
+  ${brand}
+</svg>`;
+}
+
+/** Optional OG/Twitter card metadata for shareable note URLs. */
+export interface ShellMeta {
+  ogImage?: string;     // absolute URL to an og.svg for this page
+  ogTitle?: string;     // <meta property="og:title"> override
+  ogDescription?: string;
+  pageUrl?: string;     // <meta property="og:url"> + canonical
+}
+
+function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean; meta?: ShellMeta }): string {
   // sidebarLayout puts the body directly into a flex container so the wrapper
   // landing's <aside> + <main> children lay out side-by-side. Other pages
   // (notes, canvases, gate errors) keep the centered .container layout.
   const inner = opts.sidebarLayout
-    ? `<div class="wrap-shell">${opts.body}</div>`
-    : `<main class="container ${opts.wide ? "wide" : ""}">${opts.body}</main>`;
+    ? `<div id="main-content" class="wrap-shell">${opts.body}</div>`
+    : `<main id="main-content" class="container ${opts.wide ? "wide" : ""}">${opts.body}</main>`;
+  const meta = opts.meta;
+  const ogTitle = escapeHtml(meta?.ogTitle ?? opts.title);
+  const ogDescription = meta?.ogDescription ? `<meta property="og:description" content="${escapeAttr(meta.ogDescription)}">` : "";
+  const ogUrl = meta?.pageUrl ? `<meta property="og:url" content="${escapeAttr(meta.pageUrl)}">\n<link rel="canonical" href="${escapeAttr(meta.pageUrl)}">` : "";
+  const ogImage = meta?.ogImage ? `
+<meta property="og:image" content="${escapeAttr(meta.ogImage)}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${ogTitle}">
+${meta?.ogDescription ? `<meta name="twitter:description" content="${escapeAttr(meta.ogDescription)}">` : ""}
+<meta name="twitter:image" content="${escapeAttr(meta.ogImage)}">` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(opts.title)}</title>
+<meta property="og:title" content="${ogTitle}">
+<meta property="og:type" content="article">
+${ogDescription}
+${ogUrl}
+${ogImage}
+<script>
+/* Pre-paint theme apply — avoids flash-of-wrong-theme when the user has
+   chosen "light" or "dark" via the toggle. Runs before <style> below to set
+   data-theme on <html>. localStorage access is fine on the synchronous path. */
+(function(){
+  try {
+    var m = localStorage.getItem("brainshare_theme");
+    if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m);
+  } catch (e) { /* private mode etc. */ }
+})();
+</script>
 <style>${css}</style>
 </head>
 <body>
+<a href="#main-content" class="skip-link">Skip to content</a>
 ${inner}
+${THEME_TOGGLE_HTML}
+${THEME_TOGGLE_JS}
 </body>
 </html>`;
 }
+
+// Floating theme toggle — sits in the top-right of every page (landing,
+// notes, canvases, error pages). Cycles auto → light → dark → auto.
+// Stored in localStorage; the pre-paint script in <head> applies the saved
+// choice before first paint to avoid flash-of-wrong-theme.
+const THEME_TOGGLE_HTML = `<button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme (auto / light / dark)" title="Theme: auto">
+  <svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
+</button>
+<script>
+(function(){
+  try {
+    var m = localStorage.getItem("brainshare_theme");
+    if (!m || m === "auto") return;
+    var btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    var SUN  = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+    var MOON = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+    btn.innerHTML = m === "light" ? SUN : MOON;
+    btn.setAttribute("title", "Theme: " + m + " (click to cycle)");
+  } catch(e) {}
+})();
+</script>`;
+
+const THEME_TOGGLE_JS = `<script>
+(function(){
+  var btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  var iconEl = btn.querySelector(".theme-icon");
+  var SUN = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  var MOON = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  var AUTO = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>';
+  function modeOf(){ try { return localStorage.getItem("brainshare_theme") || "auto"; } catch(e){ return "auto"; } }
+  function apply(mode){
+    var html = document.documentElement;
+    if (mode === "light") html.setAttribute("data-theme", "light");
+    else if (mode === "dark") html.setAttribute("data-theme", "dark");
+    else html.removeAttribute("data-theme");
+    btn.innerHTML = mode === "dark" ? MOON : mode === "light" ? SUN : AUTO;
+    btn.setAttribute("title", "Theme: " + mode + " (click to cycle)");
+  }
+  apply(modeOf());
+  btn.addEventListener("click", function(){
+    var order = ["auto", "light", "dark"];
+    var next = order[(order.indexOf(modeOf()) + 1) % order.length];
+    try { localStorage.setItem("brainshare_theme", next); } catch(e){}
+    apply(next);
+    // Flash a tiny tooltip-like cue
+    btn.dataset.flash = "1";
+    setTimeout(function(){ delete btn.dataset.flash; }, 400);
+  });
+})();
+</script>`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HTML helpers
