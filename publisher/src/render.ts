@@ -1883,54 +1883,6 @@ input[type="range"].gcp-slider {
 .note-list a.is-new.is-read::before { display: none; }
 .note-list a.is-new::after { opacity: 1; }
 
-/* Recently updated section */
-/* Featured / pinned note -------------------------------------------------- */
-.featured-note {
-  margin: 1em 0 1.2em;
-}
-.featured-label {
-  font-size: .72em;
-  font-weight: 700;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--text-accent);
-  margin-bottom: .45em;
-}
-.featured-card {
-  display: block;
-  padding: 1em 1.2em;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-faint);
-  border-left: 3px solid var(--text-accent);
-  border-radius: 8px;
-  text-decoration: none;
-  color: inherit;
-  transition: border-color .15s, background .15s;
-}
-.featured-card:hover { background: var(--bg-tertiary, var(--bg-secondary)); border-color: var(--text-accent); }
-.featured-card-title {
-  font-size: 1.05em;
-  font-weight: 600;
-  color: var(--text-normal);
-  margin-bottom: .35em;
-}
-.featured-card-excerpt {
-  font-size: .88em;
-  color: var(--text-muted);
-  line-height: 1.55;
-  margin-bottom: .5em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.featured-card-meta {
-  font-size: .78em;
-  color: var(--text-faint);
-  display: flex;
-  gap: .4em;
-  align-items: center;
-}
 /* Recently updated -------------------------------------------------------- */
 .recently-updated {
   margin: 1.2em 0 1.5em;
@@ -2323,7 +2275,6 @@ export interface WrapData {
   assets?: Record<string, string>;    // image filename → opaque asset key
   created_at?: string;
   gated?: boolean;
-  pinned?: string[];                  // ULIDs to feature at top; excluded from Recently Updated
 }
 
 export interface CanvasNode {
@@ -4114,15 +4065,9 @@ export async function renderWrapper(
     return `${heading}<ul class="note-list">${lis.join("")}</ul>`;
   });
 
-  // Pinned / featured note — always shown first regardless of ULID order
-  const pinnedUlids = new Set(wrap.pinned ?? []);
-  const pinnedRecords = (wrap.pinned ?? [])
-    .map(u => records.find(r => r.ulid === u && r.md))
-    .filter((r): r is NonNullable<typeof r> => r !== undefined);
-
-  // Recently updated — top 4 notes by ULID timestamp, excluding any pinned
+  // Recently updated — top 4 notes by ULID timestamp
   const recentRecords = [...records]
-    .filter(r => r.md && !pinnedUlids.has(r.ulid))
+    .filter(r => r.md)
     .sort((a, b) => b.ulid.localeCompare(a.ulid))
     .slice(0, 6);
   function ulidToDate(u: string): string {
@@ -4149,20 +4094,6 @@ export async function renderWrapper(
     const body = md.replace(/^---[\s\S]*?\n---\s*\n/, "");
     return (body.match(/\b\w+\b/g) ?? []).length;
   }
-  const pinnedHtml = pinnedRecords.map(r => {
-    const wc = noteWordCount(r.md ?? "");
-    const minutes = Math.max(1, Math.round(wc / 200));
-    const excerpt = noteExcerpt(r.md ?? "");
-    return `<section class="featured-note">
-      <div class="featured-label">Start here</div>
-      <a href="${shareBase}/${r.ulid}${tq}" class="featured-card" data-ulid="${r.ulid}">
-        <div class="featured-card-title">${escapeHtml(r.title)}</div>
-        ${excerpt ? `<div class="featured-card-excerpt">${escapeHtml(excerpt)}</div>` : ""}
-        <div class="featured-card-meta"><span>${ulidToDate(r.ulid)}</span><span>·</span><span>${minutes} min read</span></div>
-      </a>
-    </section>`;
-  }).join("");
-
   const recentHtml = recentRecords.length > 0
     ? `<section class="recently-updated"><h2 class="recently-updated-heading">Recently updated</h2><ul class="recently-updated-list-v2">${
         recentRecords.slice(0, 4).map(r => {
@@ -4253,8 +4184,6 @@ ${sidebar}
 
 <main class="wrap-main">
   ${hero}
-
-  ${pinnedHtml}
 
   ${recentHtml}
 
@@ -5213,12 +5142,11 @@ ${ogDescription}
 ${ogUrl}
 ${ogImage}
 <script>
-/* Pre-paint theme apply — avoids flash-of-wrong-theme when the user has
-   chosen "light" or "dark" via the toggle. Runs before <style> below to set
-   data-theme on <html>. localStorage access is fine on the synchronous path. */
+/* Pre-paint theme apply — avoids flash-of-wrong-theme. Default is light;
+   only overrides when the user has explicitly saved a preference. */
 (function(){
   try {
-    var m = localStorage.getItem("brainshare_theme");
+    var m = localStorage.getItem("brainshare_theme") || "light";
     if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m);
   } catch (e) { /* private mode etc. */ }
 })();
@@ -5261,8 +5189,8 @@ function pageChromeHtml(opts: { hasHelp: boolean }): string {
 <script>
 (function(){
   try {
-    var m = localStorage.getItem("brainshare_theme");
-    if (!m || m === "auto") return;
+    var m = localStorage.getItem("brainshare_theme") || "light";
+    if (m === "auto") return;
     var btn = document.getElementById("theme-toggle");
     if (!btn) return;
     var SUN  = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
@@ -5293,7 +5221,7 @@ const THEME_TOGGLE_JS = `<script>
   var SUN = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
   var MOON = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
   var AUTO = '<svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>';
-  function modeOf(){ try { return localStorage.getItem("brainshare_theme") || "auto"; } catch(e){ return "auto"; } }
+  function modeOf(){ try { return localStorage.getItem("brainshare_theme") || "light"; } catch(e){ return "light"; } }
   function apply(mode){
     var html = document.documentElement;
     if (mode === "light") html.setAttribute("data-theme", "light");
@@ -5304,7 +5232,7 @@ const THEME_TOGGLE_JS = `<script>
   }
   apply(modeOf());
   btn.addEventListener("click", function(){
-    var order = ["auto", "light", "dark"];
+    var order = ["light", "dark", "auto"];
     var next = order[(order.indexOf(modeOf()) + 1) % order.length];
     try { localStorage.setItem("brainshare_theme", next); } catch(e){}
     apply(next);

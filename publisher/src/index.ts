@@ -251,6 +251,19 @@ export default {
     const path = url.pathname;
     const origin = url.origin;
 
+    // POST /__admin/purge/:wrapId — bump wrapper cache version (auth required).
+    // Used when a deploy changes render output but no content changed in KV, so
+    // the version-keyed edge cache would otherwise keep serving stale HTML.
+    const purgeMatch = path.match(/^\/__admin\/purge\/([a-zA-Z0-9_-]{1,64})$/);
+    if (purgeMatch) {
+      if (unauthorized(env, req)) return forbidden();
+      if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+      const wrapId = purgeMatch[1];
+      await bumpWrapVersion(env, wrapId);
+      const newVer = await getWrapVersion(env, wrapId);
+      return json({ purged: wrapId, version: newVer });
+    }
+
     // PUT /api/notes/:ulid — store note + filename metadata (auth required)
     const noteMatch = path.match(/^\/api\/notes\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (noteMatch) {
