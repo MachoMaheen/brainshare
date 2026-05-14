@@ -195,43 +195,46 @@ body {
   font-weight: 600;
 }
 
-/* ─── Floating theme toggle — top-right of every page ─────────────────────
-   Cycles auto / light / dark. Icon swaps to match the active mode. Sits
-   above all content with z-index, but stays inert (pointer-events) on
-   touch-text-selection. */
-.theme-toggle {
+/* ─── Page chrome — floating pill (top-right) with help + theme buttons ────
+   Groups the ? (keyboard shortcuts) and theme-toggle into a single capsule
+   so they read as intentional UI, not stray controls. */
+.page-chrome {
   position: fixed;
   top: 14px;
   right: 14px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-radius: 999px;
+  z-index: 1000;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.chrome-btn {
   width: 36px; height: 36px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--bg-secondary);
+  background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border-faint);
+  border: 0;
   border-radius: 999px;
   cursor: pointer;
   padding: 0;
-  z-index: 1000;
-  transition: color .15s, border-color .15s, transform .15s;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  transition: color .15s, transform .15s;
 }
-.theme-toggle:hover {
-  color: var(--text-accent);
-  border-color: var(--text-accent);
+.chrome-btn:hover { color: var(--text-accent); }
+.chrome-btn:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 2px; }
+.chrome-btn .theme-icon, .chrome-btn .chrome-icon { width: 18px; height: 18px; }
+.chrome-divider {
+  width: 1px; height: 16px;
+  background: var(--border-faint);
+  flex-shrink: 0;
 }
-.theme-toggle[data-flash="1"] {
-  transform: scale(1.08) rotate(15deg);
-}
-.theme-toggle .theme-icon {
-  width: 18px; height: 18px;
-}
+.theme-toggle[data-flash="1"] { transform: scale(1.08) rotate(15deg); }
 @media (max-width: 760px) {
-  .theme-toggle {
-    width: 44px; height: 44px;
-    top: auto;
-    bottom: 18px; right: 18px;
-  }
-  .theme-toggle .theme-icon { width: 20px; height: 20px; }
+  .page-chrome { top: auto; bottom: 18px; right: 18px; }
+  .chrome-btn { width: 44px; height: 44px; }
+  .chrome-btn .theme-icon, .chrome-btn .chrome-icon { width: 20px; height: 20px; }
+  .chrome-divider { height: 22px; }
 }
 
 /* ─── Properties panel — Notion-style: dense, open by default ──────────────
@@ -2759,6 +2762,10 @@ export function renderCommandPalette(opts: {
   function openHelp() { if (help) help.hidden = false; }
   function closeHelp() { if (help) help.hidden = true; }
 
+  // Expose openHelp so the page-chrome help button (rendered outside this
+  // script's closure) can trigger the same sheet without a fake KeyboardEvent.
+  window.__brainshareOpenHelp = openHelp;
+
   function score(item, q) {
     if (!q) return 0;
     var hay = (item.label + " " + (item.hint || "")).toLowerCase();
@@ -3208,7 +3215,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     const wordCount = (bodyForCount.match(/\b\w+\b/g) ?? []).length;
     const readMinutes = Math.max(1, Math.round(wordCount / 200));
     const readingMeta = `<div class="note-reading-meta"><span class="rmeta-time">${readMinutes} min read</span><span class="rmeta-sep">·</span><span class="rmeta-words">${wordCount.toLocaleString()} words</span></div>`;
-    return shell({ title, sidebarLayout: true, meta: { ogImage, ogTitle: title, ogDescription: ogDesc, pageUrl }, body: `
+    return shell({ title, sidebarLayout: true, hasHelp: true, meta: { ogImage, ogTitle: title, ogDescription: ogDesc, pageUrl }, body: `
 ${sidebar}
 <main class="wrap-main">
   <article class="prose">
@@ -4137,6 +4144,7 @@ export async function renderWrapper(
     title: wrap.title ?? "Shared slice",
     wide: true,
     sidebarLayout: true,
+    hasHelp: true,
     body: `
 ${sidebar}
 
@@ -4728,7 +4736,7 @@ ${CANVAS_PAN_ZOOM}`;
       canvases: ctx.wrapTree.canvases,
       hasSidebar: true,
     });
-    return shell({ title, sidebarLayout: true, body: `
+    return shell({ title, sidebarLayout: true, hasHelp: true, body: `
 ${sidebar}
 <main class="wrap-main wrap-main-canvas">
   ${breadcrumb}
@@ -4995,7 +5003,7 @@ export interface ShellMeta {
   pageUrl?: string;     // <meta property="og:url"> + canonical
 }
 
-function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean; meta?: ShellMeta }): string {
+function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean; meta?: ShellMeta; hasHelp?: boolean }): string {
   // sidebarLayout puts the body directly into a flex container so the wrapper
   // landing's <aside> + <main> children lay out side-by-side. Other pages
   // (notes, canvases, gate errors) keep the centered .container layout.
@@ -5041,19 +5049,34 @@ ${ogImage}
 <body>
 <a href="#main-content" class="skip-link">Skip to content</a>
 ${inner}
-${THEME_TOGGLE_HTML}
+${pageChromeHtml({ hasHelp: opts.hasHelp ?? false })}
 ${THEME_TOGGLE_JS}
 </body>
 </html>`;
 }
 
-// Floating theme toggle — sits in the top-right of every page (landing,
-// notes, canvases, error pages). Cycles auto → light → dark → auto.
-// Stored in localStorage; the pre-paint script in <head> applies the saved
-// choice before first paint to avoid flash-of-wrong-theme.
-const THEME_TOGGLE_HTML = `<button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme (auto / light / dark)" title="Theme: auto">
-  <svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
-</button>
+// Page-chrome pill — sits in the top-right of every page (landing, notes,
+// canvases, error pages). Groups a help "?" button and the theme-toggle into
+// a single capsule so they read as intentional UI.
+//
+// hasHelp: true  → includes the ? button (wired to window.__brainshareOpenHelp)
+// hasHelp: false → omits ? button (gate-error pages have no cmd-palette/help sheet)
+function pageChromeHtml(opts: { hasHelp: boolean }): string {
+  const helpBtn = opts.hasHelp ? `
+  <button class="chrome-btn" id="help-btn" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+    <svg class="chrome-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3.5"/>
+      <circle cx="12" cy="17.5" r=".5" fill="currentColor"/>
+    </svg>
+  </button>
+  <span class="chrome-divider" aria-hidden="true"></span>` : "";
+
+  return `<div class="page-chrome" role="group" aria-label="Page controls">${helpBtn}
+  <button class="chrome-btn theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme (auto / light / dark)" title="Theme: auto">
+    <svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
+  </button>
+</div>
 <script>
 (function(){
   try {
@@ -5068,9 +5091,21 @@ const THEME_TOGGLE_HTML = `<button class="theme-toggle" id="theme-toggle" type="
   } catch(e) {}
 })();
 </script>`;
+}
 
 const THEME_TOGGLE_JS = `<script>
 (function(){
+  // Wire help button — calls window.__brainshareOpenHelp exposed by the
+  // cmd-palette script (only present on pages that have a help sheet).
+  var helpBtn = document.getElementById("help-btn");
+  if (helpBtn) {
+    helpBtn.addEventListener("click", function(){
+      if (typeof window.__brainshareOpenHelp === "function") {
+        window.__brainshareOpenHelp();
+      }
+    });
+  }
+
   var btn = document.getElementById("theme-toggle");
   if (!btn) return;
   var iconEl = btn.querySelector(".theme-icon");
