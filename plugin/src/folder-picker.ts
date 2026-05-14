@@ -72,6 +72,8 @@ export class FolderPickerModal extends Modal {
 
     // Tree (scrollable)
     const treeEl = contentEl.createDiv();
+    treeEl.setAttribute("role", "tree");
+    treeEl.setAttribute("aria-label", "Vault file tree");
     treeEl.style.maxHeight = "320px";
     treeEl.style.overflowY = "auto";
     treeEl.style.border = "1px solid var(--background-modifier-border)";
@@ -104,8 +106,10 @@ export class FolderPickerModal extends Modal {
       }
     }
 
-    // Live count
+    // Live count — aria-live so screen readers announce selection changes
     this.countEl = contentEl.createDiv();
+    this.countEl.setAttribute("aria-live", "polite");
+    this.countEl.setAttribute("aria-atomic", "true");
     this.countEl.style.fontSize = "0.85em";
     this.countEl.style.color = "var(--text-muted)";
     this.countEl.style.marginBottom = "12px";
@@ -147,6 +151,8 @@ export class FolderPickerModal extends Modal {
 
     // Status line + Publish
     this.statusEl = contentEl.createDiv();
+    this.statusEl.setAttribute("aria-live", "polite");
+    this.statusEl.setAttribute("aria-atomic", "true");
     this.statusEl.style.fontSize = "0.85em";
     this.statusEl.style.color = "var(--text-muted)";
     this.statusEl.style.minHeight = "1.4em";
@@ -167,7 +173,9 @@ export class FolderPickerModal extends Modal {
     // Render folder row (skip for vault root)
     if (!isRoot) {
       const row = this.makeRow(parent, depth);
+      row.setAttribute("role", "treeitem");
       const cb = row.createEl("input", { type: "checkbox" });
+      cb.setAttribute("aria-label", `${folder.name} (folder)`);
       cb.style.marginRight = "8px";
 
       const files = this.allMarkdown(folder);
@@ -223,7 +231,9 @@ export class FolderPickerModal extends Modal {
 
   private renderFileRow(file: TFile, parent: HTMLElement, depth: number) {
     const row = this.makeRow(parent, depth);
+    row.setAttribute("role", "treeitem");
     const cb = row.createEl("input", { type: "checkbox" });
+    cb.setAttribute("aria-label", file.basename);
     cb.style.marginRight = "8px";
     this.fileBoxes.set(file.path, cb);
 
@@ -248,7 +258,8 @@ export class FolderPickerModal extends Modal {
       const tag = row.createSpan({ text: "  •" });
       tag.style.color = "var(--text-faint)";
       tag.style.marginLeft = "6px";
-      tag.title = "Already has a ULID";
+      tag.setAttribute("aria-label", "Already has a ULID");
+      tag.setAttribute("aria-hidden", "false");
     }
   }
 

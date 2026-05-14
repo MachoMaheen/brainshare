@@ -83,6 +83,10 @@ body {
 .skip-link:focus { top: 0; }
 .container { max-width: 760px; margin: 0 auto; padding: 2.5em 1.25em 6em; }
 .wide      { max-width: 1100px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .skip-link { transition: none; }
+}
 
 /* breadcrumb */
 .breadcrumb {
@@ -4389,9 +4393,10 @@ ${palette}
   }
 
   // ── Camera reset ─────────────────────────────────────────────────────────
+  var prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function resetView() {
     var cam = renderer.getCamera();
-    if (typeof cam.animatedReset === "function") cam.animatedReset({ duration: 400 });
+    if (typeof cam.animatedReset === "function" && !prefersReducedMotion) cam.animatedReset({ duration: 400 });
     else cam.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
   }
   var resetBtn = document.getElementById("graph-reset");
