@@ -10,8 +10,10 @@ import {
   loadCanvasMeta,
   buildBacklinks,
   folderSiblings,
+  parseFrontmatter,
   NoteMeta,
   WrapData,
+  CanvasLite,
 } from "./render";
 import { signJWT, verifyJWT, TokenClaims } from "./jwt";
 import { zipSync } from "fflate";
@@ -139,8 +141,112 @@ async function checkGate(
   return { ok: true, tokenQuery: `?t=${encodeURIComponent(t)}` };
 }
 
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+
+async function getWrapVersion(env: Env, wrapId: string): Promise<number> {
+  const v = await env.NOTES.get(`ver:${wrapId}`);
+  return v ? parseInt(v, 10) : 1;
+}
+
+async function bumpWrapVersion(env: Env, wrapId: string): Promise<void> {
+  const cur = await getWrapVersion(env, wrapId);
+  await env.NOTES.put(`ver:${wrapId}`, String(cur + 1));
+}
+
+async function addRef(env: Env, refKey: string, wrapId: string): Promise<void> {
+  const raw = await env.NOTES.get(refKey);
+  const refs: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+  if (!refs.includes(wrapId)) {
+    refs.push(wrapId);
+    await env.NOTES.put(refKey, JSON.stringify(refs));
+  }
+}
+
+async function removeRef(env: Env, refKey: string, wrapId: string): Promise<void> {
+  const raw = await env.NOTES.get(refKey);
+  if (!raw) return;
+  const refs: string[] = (JSON.parse(raw) as string[]).filter((r) => r !== wrapId);
+  await env.NOTES.put(refKey, JSON.stringify(refs));
+}
+
+// ── WrapIndex — precomputed per-wrapper index for O(1) cold renders ───────────
+
+/**
+ * Precomputed index stored at wrapindex:{wrapId}. Built at publish time so cold
+ * renders of individual notes can skip loading ALL other notes in the wrapper.
+ * Drops cold-render KV reads from ~2N+M+2 to 3 (wrap + wrapindex + current note).
+ */
+interface WrapIndex {
+  notes: Array<{
+    ulid: string;
+    basename: string;
+    path: string;
+    /** body H1 → frontmatter title → basename, in that order (matches renderNote). */
+    title: string;
+  }>;
+  canvases: Array<CanvasLite>;
+  /**
+   * Backlinks: for each target ulid, the notes that link to it via [[wikilink]].
+   * Serialised as a plain object because JSON has no Map type.
+   */
+  backlinks: Record<string, Array<{ ulid: string; title: string; path: string }>>;
+  /** ISO-8601 build timestamp for debugging/forensics. */
+  builtAt: string;
+  /** Version stamp this index was built against — for sanity checks. */
+  builtForVersion: number;
+}
+
+/**
+ * Compute and persist a WrapIndex for the given wrapper. Called synchronously
+ * on PUT /api/wrappers/:id and asynchronously (via ctx.waitUntil) on note/canvas
+ * mutations so the fast read path is ready on the next cache miss.
+ */
+async function buildWrapIndex(env: Env, wrapId: string, wrap: WrapData): Promise<void> {
+  const ver = await getWrapVersion(env, wrapId);
+
+  // Load all notes (with markdown bodies — needed for H1 title + backlinks).
+  const allRecords = await loadNotes(env.NOTES, wrap.ulids);
+
+  // Compute titles using the same hierarchy renderNote uses:
+  // body H1 → frontmatter title → basename.
+  // (loadNotes only uses frontmatter → basename, so we re-derive here.)
+  const noteEntries = allRecords.map((r) => {
+    let title = r.basename;
+    if (r.md) {
+      const { fm, body } = parseFrontmatter(r.md);
+      const h1Match = body.match(/^\s*#\s+(.+?)\s*$/m);
+      const bodyH1 = h1Match ? h1Match[1].trim() : "";
+      const fmTitle = fm ? (fm.byKey.get("title") as string | undefined) : undefined;
+      title = bodyH1 || fmTitle || r.basename;
+    }
+    return { ulid: r.ulid, basename: r.basename, path: r.path, title };
+  });
+
+  // Compute canvas metadata.
+  const canvasEntries = await loadCanvasMeta(env.NOTES, wrap.canvases ?? []);
+
+  // Compute backlinks using the existing exported helper.
+  const backlinksMap = buildBacklinks(allRecords);
+  const backlinks: WrapIndex["backlinks"] = {};
+  for (const [targetUlid, sources] of backlinksMap) {
+    backlinks[targetUlid] = sources.map(({ ulid, title, path }) => ({ ulid, title, path }));
+  }
+
+  const idx: WrapIndex = {
+    notes: noteEntries,
+    canvases: canvasEntries,
+    backlinks,
+    builtAt: new Date().toISOString(),
+    builtForVersion: ver,
+  };
+
+  await env.NOTES.put(`wrapindex:${wrapId}`, JSON.stringify(idx));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     const origin = url.origin;
@@ -167,11 +273,35 @@ export default {
           const basename = notePath.split("/").pop()!.replace(/\.md$/i, "");
           await env.NOTES.put(`meta:${ulid}`, JSON.stringify({ path: notePath, basename }));
         }
+        // Invalidate caches + rebuild indexes for all wrappers that include this note.
+        // Version bump is synchronous (cache invalidation must complete before response).
+        // Index rebuild is async — a race window is fine because the fallback read path
+        // handles a missing/stale wrapindex gracefully and triggers its own rebuild.
+        const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
+        if (refsRaw) {
+          const wrapIds: string[] = JSON.parse(refsRaw);
+          await Promise.all(wrapIds.map((wid) => bumpWrapVersion(env, wid)));
+          // Async index rebuild — load each wrap then rebuild its index
+          ctx.waitUntil(Promise.all(wrapIds.map(async (wid) => {
+            const wRaw = await env.NOTES.get(`wrap:${wid}`);
+            if (wRaw) await buildWrapIndex(env, wid, JSON.parse(wRaw) as WrapData);
+          })));
+        }
         return json({ ulid, url: `${origin}/${ulid}` });
       }
       if (req.method === "DELETE") {
         await env.NOTES.delete(`note:${ulid}`);
         await env.NOTES.delete(`meta:${ulid}`);
+        // Invalidate caches + rebuild indexes for all wrappers that include this note
+        const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
+        if (refsRaw) {
+          const wrapIds: string[] = JSON.parse(refsRaw);
+          await Promise.all(wrapIds.map((wid) => bumpWrapVersion(env, wid)));
+          ctx.waitUntil(Promise.all(wrapIds.map(async (wid) => {
+            const wRaw = await env.NOTES.get(`wrap:${wid}`);
+            if (wRaw) await buildWrapIndex(env, wid, JSON.parse(wRaw) as WrapData);
+          })));
+        }
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
@@ -194,11 +324,31 @@ export default {
           const basename = p.split("/").pop()!.replace(/\.canvas$/i, "");
           await env.NOTES.put(`canvasmeta:${ulid}`, JSON.stringify({ path: p, basename }));
         }
+        // Invalidate caches + rebuild indexes for all wrappers that include this canvas
+        const refsRaw = await env.NOTES.get(`canvasrefs:${ulid}`);
+        if (refsRaw) {
+          const wrapIds: string[] = JSON.parse(refsRaw);
+          await Promise.all(wrapIds.map((wid) => bumpWrapVersion(env, wid)));
+          ctx.waitUntil(Promise.all(wrapIds.map(async (wid) => {
+            const wRaw = await env.NOTES.get(`wrap:${wid}`);
+            if (wRaw) await buildWrapIndex(env, wid, JSON.parse(wRaw) as WrapData);
+          })));
+        }
         return json({ ulid, url: `${origin}/c/${ulid}` });
       }
       if (req.method === "DELETE") {
         await env.NOTES.delete(`canvas:${ulid}`);
         await env.NOTES.delete(`canvasmeta:${ulid}`);
+        // Invalidate caches + rebuild indexes for all wrappers that include this canvas
+        const refsRaw = await env.NOTES.get(`canvasrefs:${ulid}`);
+        if (refsRaw) {
+          const wrapIds: string[] = JSON.parse(refsRaw);
+          await Promise.all(wrapIds.map((wid) => bumpWrapVersion(env, wid)));
+          ctx.waitUntil(Promise.all(wrapIds.map(async (wid) => {
+            const wRaw = await env.NOTES.get(`wrap:${wid}`);
+            if (wRaw) await buildWrapIndex(env, wid, JSON.parse(wRaw) as WrapData);
+          })));
+        }
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
@@ -350,11 +500,42 @@ export default {
         }
         if (!parsed.created_at) parsed.created_at = new Date().toISOString();
         if (parsed.gated !== true) parsed.gated = false; // normalize
+
+        // Maintain reverse indexes (noterefs / canvasrefs) so note/canvas PUTs
+        // know which wrappers to invalidate.
+        const oldRaw = await env.NOTES.get(`wrap:${id}`);
+        const oldWrap: WrapData | null = oldRaw ? JSON.parse(oldRaw) : null;
+        const oldUlids = new Set(oldWrap?.ulids ?? []);
+        const newUlids = new Set(parsed.ulids);
+        const oldCanvases = new Set(oldWrap?.canvases ?? []);
+        const newCanvases = new Set(parsed.canvases ?? []);
+
+        const refOps: Promise<void>[] = [];
+        for (const u of newUlids) { if (!oldUlids.has(u)) refOps.push(addRef(env, `noterefs:${u}`, id)); }
+        for (const u of oldUlids) { if (!newUlids.has(u)) refOps.push(removeRef(env, `noterefs:${u}`, id)); }
+        for (const u of newCanvases) { if (!oldCanvases.has(u)) refOps.push(addRef(env, `canvasrefs:${u}`, id)); }
+        for (const u of oldCanvases) { if (!newCanvases.has(u)) refOps.push(removeRef(env, `canvasrefs:${u}`, id)); }
+        await Promise.all(refOps);
+
         await env.NOTES.put(`wrap:${id}`, JSON.stringify(parsed));
+        await bumpWrapVersion(env, id);
+        // Rebuild wrapindex synchronously — the user is publishing, next GET needs it
+        // ready immediately since the version bump already invalidated the edge cache.
+        await buildWrapIndex(env, id, parsed);
         return json({ id, url: `${origin}/share/${id}`, gated: parsed.gated, canvases: parsed.canvases?.length ?? 0, assets: Object.keys(parsed.assets ?? {}).length });
       }
       if (req.method === "DELETE") {
+        // Clean up reverse indexes before deleting the wrap
+        const delRaw = await env.NOTES.get(`wrap:${id}`);
+        if (delRaw) {
+          const delWrap: WrapData = JSON.parse(delRaw);
+          const cleanOps: Promise<void>[] = [];
+          for (const u of delWrap.ulids) cleanOps.push(removeRef(env, `noterefs:${u}`, id));
+          for (const u of delWrap.canvases ?? []) cleanOps.push(removeRef(env, `canvasrefs:${u}`, id));
+          await Promise.all(cleanOps);
+        }
         await env.NOTES.delete(`wrap:${id}`);
+        await env.NOTES.delete(`wrapindex:${id}`);
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
@@ -644,55 +825,139 @@ ${entries}
       if (!wrap.ulids.includes(ulid)) {
         return html("<h1>403</h1><p>note not in this share</p>", 403);
       }
+
+      // Gate check runs BEFORE cache lookup so max_views always increments
+      // and auth failures are never served from cache.
       const gate = await checkGate(env, wrap, wrapId, url);
       if (!gate.ok) return gate.resp;
 
-      // Load full note records (incl. markdown bodies) for the whole share so
-      // we can compute backlinks + folder-nav in one pass. This is ~N extra KV
-      // reads per page view (one per note in the wrapper). Acceptable in the
-      // alpha; if/when read budget becomes a concern, precompute a
-      // backlinks:<wrapId> KV index at wrap-PUT time instead.
-      const [allRecords, canvasSet, treeCanvases] = await Promise.all([
+      // ?raw=1 is a different response shape — skip cache for it
+      if (url.searchParams.get("raw") !== "1") {
+        const ver = await getWrapVersion(env, wrapId);
+        // Cache key uses a synthetic URL embedding the version counter.
+        // JWT token is deliberately excluded so gated wraps share one cache entry.
+        const cacheKey = new Request(
+          `${origin}/__cache/v${ver}/share/${wrapId}/${ulid}`,
+          { method: "GET" }
+        );
+        const cache = caches.default;
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+
+        // Fast path: try wrapindex:{wrapId} + current note in 3 parallel KV reads.
+        // Falls back to the legacy O(N) path when the index doesn't exist yet
+        // (legacy wraps, or async rebuild hasn't landed) — see below.
+        const [indexRaw, currentMd, currentMetaRaw] = await Promise.all([
+          env.NOTES.get(`wrapindex:${wrapId}`),
+          env.NOTES.get(`note:${ulid}`),
+          env.NOTES.get(`meta:${ulid}`),
+        ]);
+
+        let resp: Response;
+
+        if (!indexRaw) {
+          // Fallback: wrapindex missing — legacy wrap or async rebuild race.
+          // Use the old O(2N+M) fan-out path and opportunistically rebuild the index.
+          const [allRecords, canvasSet, treeCanvases] = await Promise.all([
+            loadNotes(env.NOTES, wrap.ulids),
+            buildCanvasSet(env.NOTES, wrap.canvases ?? []),
+            loadCanvasMeta(env.NOTES, wrap.canvases ?? []),
+          ]);
+          const current = allRecords.find((r) => r.ulid === ulid);
+          if (!current || !current.md) return html("<h1>404</h1><p>note not yet published</p>", 404);
+          const shareSet = new Map(allRecords.map((r) => [r.basename, r.ulid]));
+          const backlinksMap = buildBacklinks(allRecords);
+          const treeNotes = allRecords.map(({ ulid: u, basename, path, title }) => ({ ulid: u, basename, path, title }));
+          const folderNav = folderSiblings(
+            { ulid: current.ulid, path: current.path },
+            allRecords,
+          );
+          const shareBase = `${origin}/share/${wrapId}`;
+          resp = html(renderNote(current.md, ulid, {
+            shareBase,
+            shareSet,
+            canvasSet,
+            assets: wrap.assets,
+            path: current.path,
+            tokenQuery: gate.tokenQuery,
+            gated: wrap.gated,
+            wrapTree: {
+              wrapTitle: wrap.title ?? "Shared slice",
+              wrapDesc: wrap.description,
+              notes: treeNotes,
+              canvases: treeCanvases,
+              assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
+            },
+            backlinks: (backlinksMap.get(ulid) ?? []).map((b) => ({
+              ulid: b.ulid, title: b.title, path: b.path,
+            })),
+            folderNav,
+          }));
+          // Opportunistically build the index so the next visitor gets the fast path.
+          ctx.waitUntil(buildWrapIndex(env, wrapId, wrap));
+        } else {
+          // Fast path: parse index + current note only (3 KV reads total).
+          if (!currentMd) return html("<h1>404</h1><p>note not yet published</p>", 404);
+
+          let idx: WrapIndex;
+          try {
+            idx = JSON.parse(indexRaw) as WrapIndex;
+          } catch {
+            // Corrupt index — fall back to full rebuild via a redirect to self;
+            // easier: just return a safe 500 and let the next request try fallback.
+            ctx.waitUntil(buildWrapIndex(env, wrapId, wrap));
+            return html("<h1>500</h1><p>index temporarily unavailable, please retry</p>", 500);
+          }
+
+          const currentMeta: NoteMeta = currentMetaRaw
+            ? (() => { try { return JSON.parse(currentMetaRaw) as NoteMeta; } catch { return { path: "", basename: ulid }; } })()
+            : { path: "", basename: ulid };
+
+          const shareSet = new Map(idx.notes.map((n) => [n.basename, n.ulid]));
+          const canvasSet = new Map(idx.canvases.map((c) => [c.basename, c.ulid]));
+          const treeNotes = idx.notes.map(({ ulid: u, basename, path, title }) => ({ ulid: u, basename, path, title }));
+          const treeCanvases = idx.canvases;
+          const folderNav = folderSiblings(
+            { ulid, path: currentMeta.path },
+            idx.notes.map((n) => ({ ulid: n.ulid, basename: n.basename, path: n.path, title: n.title })),
+          );
+          const backlinks = idx.backlinks[ulid] ?? [];
+          const shareBase = `${origin}/share/${wrapId}`;
+          resp = html(renderNote(currentMd, ulid, {
+            shareBase,
+            shareSet,
+            canvasSet,
+            assets: wrap.assets,
+            path: currentMeta.path,
+            tokenQuery: gate.tokenQuery,
+            gated: wrap.gated,
+            wrapTree: {
+              wrapTitle: wrap.title ?? "Shared slice",
+              wrapDesc: wrap.description,
+              notes: treeNotes,
+              canvases: treeCanvases,
+              assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
+            },
+            backlinks,
+            folderNav,
+          }));
+        }
+
+        resp.headers.set("cache-control", "public, max-age=86400, s-maxage=86400");
+        ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        return resp;
+      }
+
+      // ?raw=1 path (no cache)
+      const [allRecords] = await Promise.all([
         loadNotes(env.NOTES, wrap.ulids),
-        buildCanvasSet(env.NOTES, wrap.canvases ?? []),
-        loadCanvasMeta(env.NOTES, wrap.canvases ?? []),
       ]);
       const current = allRecords.find((r) => r.ulid === ulid);
       if (!current || !current.md) return html("<h1>404</h1><p>note not yet published</p>", 404);
       // ?raw=1 returns the source markdown — used by the "Copy as Markdown"
       // button in the note action row and any agent that wants the body
       // verbatim. Token still required (raw is INSIDE the gate check above).
-      if (url.searchParams.get("raw") === "1") {
-        return new Response(current.md, { headers: { "content-type": "text/markdown; charset=utf-8" } });
-      }
-      const shareSet = new Map(allRecords.map((r) => [r.basename, r.ulid]));
-      const backlinksMap = buildBacklinks(allRecords);
-      const treeNotes = allRecords.map(({ ulid, basename, path, title }) => ({ ulid, basename, path, title }));
-      const folderNav = folderSiblings(
-        { ulid: current.ulid, path: current.path },
-        allRecords,
-      );
-      const shareBase = `${origin}/share/${wrapId}`;
-      return html(renderNote(current.md, ulid, {
-        shareBase,
-        shareSet,
-        canvasSet,
-        assets: wrap.assets,
-        path: current.path,
-        tokenQuery: gate.tokenQuery,
-        gated: wrap.gated,
-        wrapTree: {
-          wrapTitle: wrap.title ?? "Shared slice",
-          wrapDesc: wrap.description,
-          notes: treeNotes,
-          canvases: treeCanvases,
-          assetCount: wrap.assets ? Object.keys(wrap.assets).length : 0,
-        },
-        backlinks: (backlinksMap.get(ulid) ?? []).map((b) => ({
-          ulid: b.ulid, title: b.title, path: b.path,
-        })),
-        folderNav,
-      }));
+      return new Response(current.md, { headers: { "content-type": "text/markdown; charset=utf-8" } });
     }
 
     // GET /c/:ulid — standalone canvas (no wrapper context)
@@ -715,9 +980,24 @@ ${entries}
       const raw = await env.NOTES.get(`wrap:${id}`);
       if (!raw) return html("<h1>404</h1><p>wrapper not found</p>", 404);
       const wrap = JSON.parse(raw) as WrapData;
+
+      // Gate check runs BEFORE cache lookup so auth failures are never cached.
       const gate = await checkGate(env, wrap, id, url);
       if (!gate.ok) return gate.resp;
-      return html(await renderWrapper(env.NOTES, origin, id, wrap, gate.tokenQuery));
+
+      const ver = await getWrapVersion(env, id);
+      const cacheKey = new Request(
+        `${origin}/__cache/v${ver}/share/${id}`,
+        { method: "GET" }
+      );
+      const cache = caches.default;
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+
+      const resp = html(await renderWrapper(env.NOTES, origin, id, wrap, gate.tokenQuery));
+      resp.headers.set("cache-control", "public, max-age=86400, s-maxage=86400");
+      ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+      return resp;
     }
 
     // GET /:ulid — standalone, never gated (no wrapper context)
