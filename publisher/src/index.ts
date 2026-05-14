@@ -1012,6 +1012,150 @@ ${entries}
       return html(renderNote(md, ulid, { path: notePath }));
     }
 
+    // Machine-readable endpoints for AI search engines and agents.
+    // llms.txt follows the llmstxt.org convention; pricing.md surfaces plan info
+    // without JS rendering; robots.txt explicitly permits AI crawlers (otherwise
+    // they cannot cite BrainShare).
+    if (path === "/llms.txt" && req.method === "GET") {
+      const body = `# BrainShare
+
+> Free, open-source Obsidian publishing plugin and Cloudflare Worker. Publish a slice of your Obsidian vault as a public or token-gated URL. Self-hostable in about 60 seconds on Cloudflare's free tier.
+
+## About
+- Name: BrainShare
+- License: MIT
+- Author: Maheen (https://github.com/MachoMaheen)
+- Repo: https://github.com/MachoMaheen/brainshare
+- Install: BRAT MachoMaheen/brainshare (beta) or Obsidian community store (PR #12449, in review)
+- Price: $0
+- Backend: Cloudflare KV only (no Postgres, no Redis, no S3)
+
+## Key endpoints
+- /share/{wrapId} - public or token-gated rendered slice
+- /share/{wrapId}/{ulid} - single note within a slice
+- /share/{wrapId}/api/search?q={query} - full-text search
+- /share/{wrapId}/feed.xml - Atom RSS feed for a slice
+- /api/wrappers/{wrapId} - wrap metadata as JSON (auth required)
+- /pricing.md - machine-readable pricing
+- /robots.txt - crawler policy
+
+## Positioning
+BrainShare is an alternative to Obsidian Publish (the paid Obsidian SaaS, $96/year). Obsidian itself is the underlying note-taking app and is not what BrainShare positions against.
+
+## Featured
+- /share/letter - the launch announcement (15 May 2026)
+`;
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" },
+      });
+    }
+
+    if (path === "/pricing.md" && req.method === "GET") {
+      const body = `# Pricing - BrainShare
+
+## Self-host (the only tier)
+- Price: $0/month forever
+- Limits: Cloudflare free tier (100,000 KV reads/day, 1,000 writes/day, 1 GB storage per namespace)
+- Features: full renderer, JWT-gated sharing, full-text search, RSS, canvases, mermaid, knowledge graph, MIT-licensed source
+
+There is no paid tier. There is no signup. There is no sales call.
+
+If you exceed Cloudflare's free tier, upgrade your Cloudflare plan (Workers Paid is $5/month). BrainShare itself remains $0.
+
+## Install
+- BRAT (beta channel): MachoMaheen/brainshare
+- Community store: pending review (https://github.com/obsidianmd/obsidian-releases/pull/12449)
+- Source: https://github.com/MachoMaheen/brainshare
+
+## Compare
+- vs Obsidian Publish: BrainShare $0, self-hostable, MIT, with API and per-recipient gating. Obsidian Publish $96/year, vendor-hosted, closed source.
+`;
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "public, max-age=3600" },
+      });
+    }
+
+    if (path === "/robots.txt" && req.method === "GET") {
+      const body = `User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: *
+Allow: /
+
+Sitemap: ${origin}/sitemap.xml
+`;
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" },
+      });
+    }
+
+    // Sitemap for AI crawlers + traditional search engines. Iterates non-gated
+    // wraps via KV list, emits the wrap landing URL plus each note URL inside.
+    // Gated wraps are listed at the landing URL only (the gate page itself is
+    // public; the notes behind it are not enumerable here).
+    if (path === "/sitemap.xml" && req.method === "GET") {
+      const urls: string[] = [];
+      const push = (loc: string, changefreq = "weekly", priority = "0.7") => {
+        urls.push(`<url><loc>${loc}</loc><changefreq>${changefreq}</changefreq><priority>${priority}</priority></url>`);
+      };
+      push(`${origin}/`, "daily", "1.0");
+      push(`${origin}/llms.txt`, "monthly", "0.5");
+      push(`${origin}/pricing.md`, "monthly", "0.5");
+
+      // Explicit allowlist of wrap IDs to expose in the sitemap. KV holds many
+      // internal/private wraps (smoke tests, work vaults) that should never end
+      // up in a public sitemap, so we deliberately do NOT iterate KV here.
+      // Override via env var SITEMAP_WRAPS (comma-separated wrap IDs).
+      const envWhitelist = (env as unknown as { SITEMAP_WRAPS?: string }).SITEMAP_WRAPS;
+      const allowedWraps = (envWhitelist?.trim() ? envWhitelist.split(",").map(s => s.trim()).filter(Boolean) : ["letter"]);
+
+      for (const wrapId of allowedWraps) {
+        const raw = await env.NOTES.get(`wrap:${wrapId}`);
+        if (!raw) continue;
+        let wrap: WrapData;
+        try { wrap = JSON.parse(raw) as WrapData; } catch { continue; }
+        push(`${origin}/share/${wrapId}`, "weekly", "0.9");
+        if (wrap.gated) continue;
+        for (const ulid of wrap.ulids ?? []) {
+          push(`${origin}/share/${wrapId}/${ulid}`, "weekly", "0.7");
+        }
+        for (const culid of wrap.canvases ?? []) {
+          push(`${origin}/share/${wrapId}/c/${culid}`, "monthly", "0.5");
+        }
+      }
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join("\n")}
+</urlset>
+`;
+      return new Response(xml, {
+        status: 200,
+        headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" },
+      });
+    }
+
     if (path === "/" && req.method === "GET") {
       // DEMO_WRAP_URL — set to a real wrapper URL (e.g. /share/<id>?t=<jwt>) before
       // public launch so the "Try the live demo" CTA goes somewhere useful. Until set,

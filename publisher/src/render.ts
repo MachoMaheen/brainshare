@@ -3210,12 +3210,30 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     const noteExcerpt = noteBody.replace(/[#*_`[\]]/g, "").replace(/\s+/g, " ").slice(0, 160).trim();
     const ogDesc = noteExcerpt || (wrapTitle ? `From the "${wrapTitle}" brain share` : "Published via BrainShare");
     const pageUrl = `${ctx.shareBase}/${ulid}`;
+    // JSON-LD: Article on every note, FAQPage if the note is tagged "faq" or
+    // titled with "FAQ". AI search engines extract Q&A pairs from FAQPage and
+    // surface them directly in answers (highest-extractability content shape).
+    const fmCreated = fm?.byKey.get("created");
+    const fmUpdated = fm?.byKey.get("updated");
+    const fmAuthor = fm?.byKey.get("author");
+    const articleLd = buildArticleLd({
+      headline: title,
+      datePublished: typeof fmCreated === "string" ? fmCreated : undefined,
+      dateModified: typeof fmUpdated === "string" ? fmUpdated : (typeof fmCreated === "string" ? fmCreated : undefined),
+      author: typeof fmAuthor === "string" ? fmAuthor : undefined,
+      pageUrl,
+    });
+    const fmTags = fm?.byKey.get("tags");
+    const tagList = Array.isArray(fmTags) ? fmTags : (typeof fmTags === "string" ? [fmTags] : []);
+    const isFaq = /\bfaq\b/i.test(title) || tagList.some(t => /^faq$/i.test(t));
+    const faqLd = isFaq ? buildFaqLd(noteBody) : "";
+    const jsonLd = articleLd + faqLd;
     // Reading time and word count — strip frontmatter, count words, divide by 200 wpm
     const bodyForCount = md.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/[#*_`[\]]/g, "");
     const wordCount = (bodyForCount.match(/\b\w+\b/g) ?? []).length;
     const readMinutes = Math.max(1, Math.round(wordCount / 200));
     const readingMeta = `<div class="note-reading-meta"><span class="rmeta-time">${readMinutes} min read</span><span class="rmeta-sep">·</span><span class="rmeta-words">${wordCount.toLocaleString()} words</span></div>`;
-    return shell({ title, sidebarLayout: true, hasHelp: true, meta: { ogImage, ogTitle: title, ogDescription: ogDesc, pageUrl }, body: `
+    return shell({ title, sidebarLayout: true, hasHelp: true, meta: { ogImage, ogTitle: title, ogDescription: ogDesc, pageUrl, jsonLd }, body: `
 ${sidebar}
 <main class="wrap-main">
   <article class="prose">
@@ -3245,7 +3263,18 @@ ${palette}
   const wordCount = (bodyForCount.match(/\b\w+\b/g) ?? []).length;
   const readMinutes = Math.max(1, Math.round(wordCount / 200));
   const readingMeta = `<div class="note-reading-meta"><span class="rmeta-time">${readMinutes} min read</span><span class="rmeta-sep">·</span><span class="rmeta-words">${wordCount.toLocaleString()} words</span></div>`;
-  return shell({ title, body: `
+  // JSON-LD Article for standalone (non-scoped) note pages. No FAQ check here
+  // because standalone notes are rare; the FAQ note lives inside a wrap.
+  const fmCreatedSa = fm?.byKey.get("created");
+  const fmUpdatedSa = fm?.byKey.get("updated");
+  const fmAuthorSa = fm?.byKey.get("author");
+  const articleLdSa = buildArticleLd({
+    headline: title,
+    datePublished: typeof fmCreatedSa === "string" ? fmCreatedSa : undefined,
+    dateModified: typeof fmUpdatedSa === "string" ? fmUpdatedSa : (typeof fmCreatedSa === "string" ? fmCreatedSa : undefined),
+    author: typeof fmAuthorSa === "string" ? fmAuthorSa : undefined,
+  });
+  return shell({ title, meta: { jsonLd: articleLdSa }, body: `
 ${breadcrumb}
 <h1>${escapeHtml(title)}</h1>
 ${readingMeta}
@@ -5001,6 +5030,79 @@ export interface ShellMeta {
   ogTitle?: string;     // <meta property="og:title"> override
   ogDescription?: string;
   pageUrl?: string;     // <meta property="og:url"> + canonical
+  jsonLd?: string;      // additional JSON-LD blocks (already wrapped in <script>)
+}
+
+// Baseline SoftwareApplication schema. Emitted on every page rendered through
+// shell() so AI search engines can resolve the BrainShare product entity from
+// any URL. The Article/FAQPage schemas (built per-page in renderNote) layer on
+// top of this baseline.
+const BRAINSHARE_APP_LD = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"BrainShare","applicationCategory":"Publishing","operatingSystem":"Cross-platform","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"Maheen","url":"https://github.com/MachoMaheen"},"url":"https://github.com/MachoMaheen/brainshare","sameAs":["https://brainshare-publisher.machomaheen.workers.dev"],"license":"https://opensource.org/licenses/MIT"}</script>`;
+
+function buildArticleLd(opts: { headline: string; datePublished?: string; dateModified?: string; author?: string; pageUrl?: string }): string {
+  const obj: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: opts.headline,
+    author: { "@type": "Person", name: opts.author || "Maheen" },
+  };
+  if (opts.datePublished) obj.datePublished = opts.datePublished;
+  if (opts.dateModified) obj.dateModified = opts.dateModified;
+  if (opts.pageUrl) obj.mainEntityOfPage = opts.pageUrl;
+  return `<script type="application/ld+json">${JSON.stringify(obj)}</script>`;
+}
+
+// Extract Q&A pairs from a markdown body where each H2 is a question and the
+// paragraphs that follow (up to the next H2 or end) are the answer. Used to
+// emit FAQPage schema on FAQ notes so AI search engines can pull individual
+// Q&A entries into AI Overviews and ChatGPT/Perplexity answers.
+function extractFaqPairs(body: string): Array<{ q: string; a: string }> {
+  const lines = body.split("\n");
+  const pairs: Array<{ q: string; a: string }> = [];
+  let currentQ: string | null = null;
+  let currentABuf: string[] = [];
+  const flush = () => {
+    if (currentQ) {
+      const a = currentABuf.join(" ").replace(/\s+/g, " ").trim();
+      if (a) pairs.push({ q: currentQ, a });
+    }
+    currentQ = null;
+    currentABuf = [];
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (h2) {
+      flush();
+      currentQ = h2[1].replace(/[*_`]/g, "").trim();
+      continue;
+    }
+    if (line.startsWith("# ") || line.startsWith("### ")) {
+      flush();
+      continue;
+    }
+    if (currentQ && line) {
+      const stripped = line.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t, a) => (a ?? t)).replace(/[*_`]/g, "");
+      currentABuf.push(stripped);
+    }
+  }
+  flush();
+  return pairs.slice(0, 30);
+}
+
+function buildFaqLd(body: string): string {
+  const pairs = extractFaqPairs(body);
+  if (pairs.length === 0) return "";
+  const obj = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: pairs.map(({ q, a }) => ({
+      "@type": "Question",
+      name: q,
+      acceptedAnswer: { "@type": "Answer", text: a },
+    })),
+  };
+  return `<script type="application/ld+json">${JSON.stringify(obj)}</script>`;
 }
 
 function shell(opts: { title: string; body: string; wide?: boolean; sidebarLayout?: boolean; meta?: ShellMeta; hasHelp?: boolean }): string {
@@ -5045,6 +5147,8 @@ ${ogImage}
 })();
 </script>
 <style>${css}</style>
+${BRAINSHARE_APP_LD}
+${meta?.jsonLd ?? ""}
 </head>
 <body>
 <a href="#main-content" class="skip-link">Skip to content</a>
