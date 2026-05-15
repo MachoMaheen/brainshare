@@ -40,6 +40,10 @@ export class FolderPickerModal extends Modal {
   private fileBoxes = new Map<string, HTMLInputElement>();
   private folderBoxes = new Map<string, { cb: HTMLInputElement; files: string[] }>();
 
+  // path → row element refs for search filtering
+  private fileRows = new Map<string, HTMLElement>();
+  private folderRows = new Map<string, HTMLElement>();
+
   // mutable refs to update during publish
   private statusEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
@@ -69,6 +73,19 @@ export class FolderPickerModal extends Modal {
         : "Pick the folders and notes to share. Folder checkboxes select everything inside, but you can untick individual notes to opt them out.",
       cls: "setting-item-description",
     });
+
+    // Search / filter input
+    const searchInput = contentEl.createEl("input", { type: "text" });
+    searchInput.placeholder = "Filter notes…";
+    searchInput.setAttribute("aria-label", "Filter notes in tree");
+    searchInput.style.cssText = [
+      "width:100%", "box-sizing:border-box", "margin-bottom:8px",
+      "padding:6px 10px", "border-radius:4px",
+      "border:1px solid var(--background-modifier-border)",
+      "background:var(--background-primary)", "color:var(--text-normal)",
+      "font-size:0.9em", "outline:none",
+    ].join(";");
+    searchInput.addEventListener("input", () => this.applyFilter(searchInput.value));
 
     // Tree (scrollable)
     const treeEl = contentEl.createDiv();
@@ -180,6 +197,7 @@ export class FolderPickerModal extends Modal {
 
       const files = this.allMarkdown(folder);
       this.folderBoxes.set(folder.path, { cb, files: files.map((f) => f.path) });
+      this.folderRows.set(folder.path, row);
 
       cb.addEventListener("change", () => {
         const want = cb.checked;
@@ -236,6 +254,7 @@ export class FolderPickerModal extends Modal {
     cb.setAttribute("aria-label", file.basename);
     cb.style.marginRight = "8px";
     this.fileBoxes.set(file.path, cb);
+    this.fileRows.set(file.path, row);
 
     cb.addEventListener("change", () => {
       if (cb.checked) this.selectedFiles.add(file.path);
@@ -303,6 +322,21 @@ export class FolderPickerModal extends Modal {
         cb.checked = false;
         cb.indeterminate = true;
       }
+    }
+  }
+
+  private applyFilter(q: string) {
+    const lower = q.toLowerCase();
+    for (const [path, row] of this.fileRows) {
+      const name = (path.split("/").pop() ?? path).toLowerCase();
+      row.style.display = !lower || name.includes(lower) ? "" : "none";
+    }
+    for (const [fPath, row] of this.folderRows) {
+      const { files } = this.folderBoxes.get(fPath) ?? { files: [] };
+      const anyMatch = !lower || files.some(p =>
+        (p.split("/").pop() ?? p).toLowerCase().includes(lower)
+      );
+      row.style.display = anyMatch ? "" : "none";
     }
   }
 
