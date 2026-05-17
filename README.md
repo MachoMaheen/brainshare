@@ -1,51 +1,39 @@
 # BrainShare
 
-> Selectively publish slices of your Obsidian second brain to private URLs. ULID-stable note IDs, JWT-gated access, scoped wrapper URLs that resolve internal wikilinks, force-directed subgraph viewer, full Obsidian-style chrome.
+**Publish a curated slice of your Obsidian vault as a live URL — wikilinks working, knowledge graph visible — in one click.**
 
-**Live demo:** https://brainshare-publisher.machomaheen.workers.dev/share/brainshare-kb-tour
+[![License: MIT](https://img.shields.io/badge/License-MIT-7f6df2.svg)](./LICENSE)
+[![Cloudflare Workers](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
+[![Install via BRAT](https://img.shields.io/badge/BRAT-MachoMaheen%2Fbrainshare-5c2d91)](https://github.com/TfTHacker/obsidian42-brat)
 
----
-
-## How to use BrainShare, self-hosted by design
-
-BrainShare is **self-hosted, single-tenant**. There is no signup page, no `brainshare.app` to log into. Every user runs their own ~10-minute Cloudflare Worker. Your notes never touch shared infrastructure.
-
-| You're trying to… | Do this |
-|---|---|
-| **Try it for 30 seconds** | Click the live demo link above. Read a published slice. No install. |
-| **Publish your own slices** | [Deploy your own worker (10 min, free)](#quickstart-zero-to-deployed-in-10-minutes) → install the Obsidian plugin → point it at your worker URL |
-| **Share with a teammate (one author)** | They open the URLs you send. They don't deploy anything. Done. |
-| **Share with a team (multiple authors)** | Run one shared worker for the team; put the `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault, etc.). Each author installs the plugin pointing at the same worker. |
-| **Host BrainShare for strangers** | Not the design. BrainShare is self-hosted by intent. Each operator runs their own worker. |
-
-### Self-hosted by design
-
-BrainShare is built to run on your own Cloudflare account. Your private notes never touch shared infrastructure. Cloudflare's free tier covers about 100k requests per day per worker, so the cost is $0 for almost everyone. If you want a hosted experience for your team, run one shared worker and put the `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault, etc.). Each author installs the plugin pointing at the same worker.
-
-### You cannot share credentials across users
-
-If you hand someone your `PUBLISHER_TOKEN`, they get full read/write/delete on **every** note in your worker, plus your KV bill. Tokens are full-permission, single-tenant. Either:
-
-- **Deploy a worker per user**: true isolation, totally separate KV namespaces
-- **Share one worker as a team**: fine when everyone in the team is trusted (same as sharing a database password)
+**Live demo →** https://brainshare-publisher.machomaheen.workers.dev/share/letter
+*(That page was published from an Obsidian vault using BrainShare. The page IS the demo.)*
 
 ---
 
 ## Why this exists
 
-You keep an Obsidian vault as a "second brain" for a codebase, a product, or a company. You want to share a *slice* of it (3 notes, or a folder, or a curated subgraph) with a teammate, without exposing the whole vault and without forcing them to install Obsidian. Existing tools (Obsidian Publish, Quartz, Jotbird) publish everything, or one note at a time, and don't let multiple people's brains compose into one shared graph.
+You keep an Obsidian vault as a second brain for a codebase, a product, a research thread. You want to share a *slice* of it — 7 notes, a folder, a curated subgraph — without exposing the whole vault, without forcing the recipient to install Obsidian, and without losing what makes the vault useful: the wikilinks, the graph, the context.
 
-BrainShare's bet: the value of a second brain isn't the notes. It's the **curation**. So sharing should be slice-level, URL-driven, and federation-friendly. See the [philosophical anchor (Karpathy gist)](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+Existing tools (Obsidian Publish, Quartz, Jotbird) publish everything or one note at a time, and don't let you compose multiple people's notes into one shared graph.
+
+BrainShare's bet: **the value of a second brain isn't the notes — it's the curation.** Sharing should be slice-level, URL-driven, and agent-readable. The page is clean HTML at a stable URL: a human can read it in a browser, and an AI agent can read it at the same URL. See the [philosophical anchor](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+
+---
 
 ## Features
 
-- **Per-note publishing**: every note gets a stable ULID and a `/<ulid>` public URL
-- **Folder publishing**: pick one or more folders from a tree modal, all `.md` notes inside get stamped + published + bundled into a wrapper share URL in one click
-- **Scoped wrapper URLs**: `/share/<wrap-id>/<ulid>` views render wikilinks as navigable internal links *only when the target is in the same share-set*; everything else stays as a "private" pill
-- **Force-directed subgraph viewer**: sigma.js graph of the shared notes on the wrapper landing page; click a node to open it
-- **Obsidian-style chrome**: palette match, callouts (`> [!abstract]` etc.) rendered as colored boxes with icons, properties panel, folder breadcrumb, dark mode
-- **JWT-gated wrappers**: mark a wrapper `gated: true`, mint per-recipient tokens with expiry / view-limits, revoke on demand
-- **Auto-stamped ULIDs**: Obsidian plugin stamps a stable ID into every note's frontmatter on creation (and bulk-stamps existing notes)
+- **One-click publish** — select notes or folders from a tree modal in Obsidian, name the slice, hit Publish. The whole slice is live on Cloudflare's edge in seconds.
+- **Stable ULID note IDs** — every note gets a permanent ID stamped into its frontmatter; auto-stamped on creation or bulk-stamped for existing vaults.
+- **Working wikilinks** — within a slice, `[[links]]` resolve to navigable URLs. Targets outside the slice render as "private" pills — no broken links, no leaked context.
+- **Force-directed knowledge graph** — every shared slice gets an interactive Sigma.js graph of the notes and their connections. Hover to highlight, drag to explore.
+- **Obsidian-style rendering** — callouts (`> [!note]`, `> [!warning]`, etc.), properties panel, folder breadcrumb, backlinks, full-text search, tags.
+- **JWT-gated shares** — mark any slice `gated: true`, mint per-recipient tokens with expiry, view-count limits, and revocation. Each recipient gets their own token; revoke one without touching the others.
+- **Real API** — `/api/search`, `/api/wraps`, `/api/notes/:ulid`, `/api/feed.xml`. Your slice is queryable, not just readable.
+- **Instant unpublish** — one button in the plugin removes the slice from the edge immediately. Nothing persists without your intent.
+- **Agent-readable** — clean server-side-rendered HTML at a stable URL, `llms.txt`, JSON-LD schemas. Same URL a human reads, an agent can cite.
+
+---
 
 ## Architecture
 
@@ -53,23 +41,24 @@ BrainShare's bet: the value of a second brain isn't the notes. It's the **curati
 ┌─────────────────────────────────────────────────────┐
 │  Obsidian vault  (your second brain)                │
 │  ↓ plugin stamps ULIDs into frontmatter             │
-│  ↓ "Publish current note" sends MD + filename       │
+│  ↓ select notes → click Publish                     │
 └─────────────────────────────────────────────────────┘
                         │  PUT /api/notes/:ulid
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│  Cloudflare Worker (publisher)                      │
-│    - KV-backed                                      │
-│    - HS256-JWT auth on share routes                 │
-│    - renders MD → Obsidian-style HTML               │
-│    - resolves wikilinks against share-set           │
-│    - sigma.js subgraph data                         │
+│  Cloudflare Worker  (publisher/)                    │
+│  · KV-backed, no Postgres, no Redis, no S3          │
+│  · HS256-JWT auth on gated routes                   │
+│  · server-side MD → Obsidian-style HTML             │
+│  · resolves wikilinks against share-set             │
+│  · sigma.js + d3-force graph data                   │
 └─────────────────────────────────────────────────────┘
-                        │  GET /share/:wrap?t=<jwt>
+                        │  GET /share/:wrap-id
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│  Recipient's browser                                │
-│  reads slice, navigates wikilinks within share-set  │
+│  Anyone with the URL                                │
+│  reads the slice, navigates wikilinks within it,    │
+│  or is an AI agent citing it in context             │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -78,18 +67,35 @@ Three packages, one worker:
 | Package | What | Where it runs |
 |---|---|---|
 | `publisher/` | Cloudflare Worker, KV storage, JWT, rendering | Cloudflare edge |
-| `plugin/` | Obsidian plugin, ULID stamper + publish command | Obsidian (Electron) |
-| `wrapper/` | Node CLI, `create / mint / revoke` subcommands | your terminal |
+| `plugin/` | Obsidian plugin — ULID stamper, publish modal, slice manager | Obsidian (Electron) |
+| `wrapper/` | Node CLI — `create / mint / revoke` subcommands | your terminal |
 
-## Quickstart (zero to deployed in ~10 minutes)
+---
 
-> This is the path for new users. You'll end up with your own Cloudflare Worker URL and a token that only you have. Your notes go to your KV namespace, not anybody else's.
+## Self-hosted by design
+
+BrainShare is **self-hosted, single-tenant**. There is no `brainshare.app` to sign up for. Every user runs their own Cloudflare Worker — your notes never touch shared infrastructure. Cloudflare's free tier covers ~100k requests/day per worker, so the cost is $0 for almost everyone.
+
+| You're trying to… | Do this |
+|---|---|
+| **Try it for 30 seconds** | Open the live demo link above. No install. |
+| **Publish your own slices** | [Deploy your worker (10 min, free)](#quickstart) → install the Obsidian plugin → point it at your URL |
+| **Share with a teammate** | They open URLs you send. They don't deploy anything. |
+| **Team with multiple authors** | Run one shared worker; put `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault). Each author installs the plugin pointing at the same worker. |
+
+> **Note on tokens:** `PUBLISHER_TOKEN` is full read/write/delete on your worker. Don't share it like a read URL — share slice URLs instead. For per-recipient access control, use JWT-gated wrappers.
+
+---
+
+## Quickstart
+
+> Zero to a live URL in ~10 minutes. You'll have your own Cloudflare Worker URL and a token only you hold. Your notes go to your KV namespace.
 
 ### Prerequisites
 
-- Cloudflare account (free tier is fine, sign up at [cloudflare.com](https://cloudflare.com) if you don't have one)
+- Cloudflare account (free tier — [cloudflare.com](https://cloudflare.com))
 - Node 20+
-- An Obsidian vault you want to publish from
+- An Obsidian vault
 
 ### 1. Clone + deploy the worker
 
@@ -101,185 +107,169 @@ cp wrangler.toml.example wrangler.toml
 npm install
 npx wrangler login
 
-# Create both KV namespaces and paste the IDs into wrangler.toml
-npx wrangler kv namespace create NOTES                # → copy `id`
-npx wrangler kv namespace create NOTES --preview      # → copy `preview_id`
+# Create KV namespaces and paste the IDs into wrangler.toml
+npx wrangler kv namespace create NOTES          # → copy `id`
+npx wrangler kv namespace create NOTES --preview # → copy `preview_id`
 
-# Generate two strong secrets and push them
+# Generate secrets and push them
 echo $(openssl rand -hex 32) | npx wrangler secret put PUBLISHER_TOKEN
 echo $(openssl rand -hex 32) | npx wrangler secret put JWT_SECRET
 
 npx wrangler deploy
-# → URL like https://brainshare-publisher.<your-subdomain>.workers.dev
+# → https://brainshare-publisher.<your-subdomain>.workers.dev
 ```
 
-Save the `PUBLISHER_TOKEN` value somewhere safe, you'll paste it into the plugin and the CLI. (Cloudflare can't show it to you again.)
+Save the `PUBLISHER_TOKEN` value — Cloudflare won't show it again. Paste it into the plugin settings in step 2.
 
 ### 2. Install the Obsidian plugin
 
-**Option A: via [BRAT](https://github.com/TfTHacker/obsidian42-brat) (one-click, recommended):**
+**Via BRAT (recommended):**
 
-1. Install the **Obsidian42 BRAT** plugin from the community store and enable it.
-2. **Cmd+P → "BRAT: Add a beta plugin for testing"** → paste `MachoMaheen/brainshare`.
-3. BRAT downloads the latest GitHub Release into your vault. Enable BrainShare in **Settings → Community plugins**.
+1. Install **Obsidian42 BRAT** from the community store.
+2. `Cmd+P → "BRAT: Add a beta plugin"` → paste `MachoMaheen/brainshare`.
+3. Enable BrainShare in **Settings → Community plugins**.
 
-**Option B: build from source:**
+**Build from source:**
 
 ```bash
 cd ~/Desktop/brainshare/plugin
-npm install
-npm run build
-
-mkdir -p <your-vault>/.obsidian/plugins/brainshare
-cp manifest.json main.js <your-vault>/.obsidian/plugins/brainshare/
+npm install && npm run build
+mkdir -p <vault>/.obsidian/plugins/brainshare
+cp manifest.json main.js <vault>/.obsidian/plugins/brainshare/
 ```
 
-After install (either path): **Settings → Community plugins → enable BrainShare → BrainShare settings**
-
+**Plugin settings** (Settings → BrainShare):
 - **Publisher URL**: your worker URL from step 1
-- **Publisher token**: the `PUBLISHER_TOKEN` value
+- **Publisher token**: your `PUBLISHER_TOKEN`
 - **Auto-stamp ULIDs**: on
 
-Run command **"BrainShare: Stamp ULIDs into all notes"** to retroactively stamp existing notes. New notes auto-stamp on creation.
+Run `Cmd+P → "BrainShare: Stamp ULIDs into all notes"` to stamp your existing vault. New notes stamp on creation.
 
-### 3. Publish
+### 3. Publish a slice
 
-**Single note:** open any note → **Cmd+P → "BrainShare: Publish current note"**. The note's URL is copied to your clipboard.
+**From the plugin:**
 
-**Whole folder(s):** **Cmd+P → "BrainShare: Publish folder(s)…"**. A modal opens with your vault's folder tree, check the folders you want, set a wrapper title, optionally toggle `Gated`, and click Publish. Every `.md` inside the chosen folders gets ULID-stamped, pushed, and bundled into one wrapper share URL.
+`Cmd+P → "BrainShare: Publish slice…"` → pick folders or individual notes from the tree, name the slice, click Publish. A share URL is copied to your clipboard.
 
-### 4. Bundle multiple notes into a shareable wrapper
+**Single note:**
+
+`Cmd+P → "BrainShare: Publish current note"` — the note's direct URL is copied.
+
+### 4. (Optional) JWT-gated shares via CLI
 
 ```bash
-cd ~/Desktop/brainshare/wrapper
-npm install
+cd ~/Desktop/brainshare/wrapper && npm install
 
+# Create a gated wrapper
 npx tsx src/cli.ts create \
-  --ulids 01HX...01HX...01HX... \
-  --title "My share" \
-  --description "Curated slice for ..." \
-  --name my-share-1 \
-  --publisher https://brainshare-publisher.<your-subdomain>.workers.dev \
+  --ulids 01HX... 01HX... \
+  --title "Q2 architecture notes" \
+  --name q2-arch \
+  --gated \
+  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
   --token <PUBLISHER_TOKEN>
-```
 
-That prints a `https://.../share/my-share-1` URL, share it with anyone.
-
-### 5. (Optional) Lock the wrapper behind tokens
-
-Add `--gated` to the create command, then mint per-recipient tokens:
-
-```bash
+# Mint a per-recipient token (7 days, 10 views max)
 npx tsx src/cli.ts mint \
-  --wrap my-share-1 \
+  --wrap q2-arch \
   --exp-days 7 \
   --max-views 10 \
   --viewer "Alice" \
-  --publisher https://brainshare-publisher.<your-subdomain>.workers.dev \
+  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
   --token <PUBLISHER_TOKEN>
-```
 
-The output `url:` line is what you DM. Each token has its own `jti`, revoke any single recipient with:
-
-```bash
+# Revoke one recipient without affecting others
 npx tsx src/cli.ts revoke \
-  --wrap my-share-1 \
-  --jti <jti-from-mint-output> \
-  --publisher https://brainshare-publisher.<your-subdomain>.workers.dev \
+  --wrap q2-arch \
+  --jti <jti-from-mint> \
+  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
   --token <PUBLISHER_TOKEN>
 ```
+
+---
 
 ## Bulk-publish an entire vault
 
-`scripts/bulk-publish.py` walks every `.md` in a vault, stamps a ULID if missing, PUTs to the worker, and writes a list of all published ULIDs you can feed to the wrapper CLI.
+`scripts/bulk-publish.py` walks every `.md` in a vault, stamps a ULID if missing, PUTs to the worker, and writes a list of all published ULIDs for use with the CLI.
 
 ```bash
 python3 scripts/bulk-publish.py \
   ~/path/to/your-vault \
-  https://brainshare-publisher.<your-subdomain>.workers.dev \
+  https://brainshare-publisher.<subdomain>.workers.dev \
   <PUBLISHER_TOKEN>
 ```
 
-## Calling the publisher API directly
+---
 
-⚠ **Cloudflare's bot-fight protection is enabled on `*.workers.dev` and will reject any request whose User-Agent looks scripted.** The failure is silent, you get HTTP 403 with body `error code: 1010` and *no useful detail*. The auth header is correct, the token is fine, the URL is fine; it's just the UA. This bites everyone who tries to hit the API with `curl` defaults, Python's `urllib`, `requests`, `httpx`, `node-fetch`, etc.
+## Calling the API directly
 
-**Set a custom User-Agent on every request.** Any non-default value works. The bundled scripts use `BrainShare-bulk-publish/0.2`.
-
-`curl` example, publish one note:
+⚠ **Cloudflare's bot-fight protection on `*.workers.dev` will silently reject requests with default User-Agent strings** (403 with `error code: 1010`). The token is fine, the URL is fine — it's just the UA. Set a custom `User-Agent` on every scripted request.
 
 ```bash
 curl -X PUT \
-  "https://brainshare-publisher.<your-subdomain>.workers.dev/api/notes/01HXYZ..." \
-  -H "authorization: Bearer $PUBLISHER_TOKEN" \
-  -H "content-type: text/markdown" \
-  -H "x-note-path: My Note.md" \
-  -H "user-agent: my-uploader/1.0" \
+  "https://brainshare-publisher.<subdomain>.workers.dev/api/notes/01HXYZ..." \
+  -H "Authorization: Bearer $PUBLISHER_TOKEN" \
+  -H "Content-Type: text/markdown" \
+  -H "X-Note-Path: My Note.md" \
+  -H "User-Agent: my-uploader/1.0" \
   --data-binary @"My Note.md"
 ```
 
-`python3` example, same call:
-
-```python
-import urllib.request
-body = open("My Note.md", "rb").read()
-req = urllib.request.Request(
-    "https://brainshare-publisher.<your-subdomain>.workers.dev/api/notes/01HXYZ...",
-    data=body, method="PUT",
-    headers={
-        "authorization": f"Bearer {PUBLISHER_TOKEN}",
-        "content-type": "text/markdown",
-        "x-note-path": "My Note.md",
-        "user-agent": "my-uploader/1.0",  # ← required, or you get 403
-    })
-with urllib.request.urlopen(req, timeout=30) as r:
-    print(r.status, r.read().decode())
-```
-
-If you see HTTP 403 with `error code: 1010`, the User-Agent is the first thing to check, not the token, not the URL.
-
-## Production readiness, be honest
-
-| Area | Status |
-|---|---|
-| Type-checked end-to-end (TypeScript strict) | ✅ |
-| JWT auth with revoke / expiry / view-limits | ✅ |
-| Cloudflare-edge replicated KV | ✅ |
-| Smoke-tested all routes + 33 unit tests (JWT, frontmatter, ULID) | ✅ |
-| Per-IP rate limiting on auth-required write routes | ✅, KV-based, catches sustained floods (>1 min); bursts may leak due to KV's eventual consistency. For hard ceilings use Cloudflare's paid Rate Limiting or Durable Objects. |
-| Backup / export | ✅, `GET /api/export` returns NDJSON of every KV key; `scripts/export.py` for CLI dumps |
-| Multi-tenancy (shared worker, multiple authors) | ❌, single `PUBLISHER_TOKEN` per worker; deploy your own |
-| Mermaid / syntax highlighting / math | ❌, markdown rendering is plain |
-| Mobile / accessibility audit | ❌ |
-| Plugin in Obsidian community store | 🟡, submitted, awaiting review (~2-4 weeks). Install via BRAT in the meantime. |
-
-**TL;DR: production-ready. Deploy your own worker; you control your own data and tokens, and nobody else can touch them.**
-
-## How wikilinks work in scoped views
-
-Two render modes, one renderer:
-
-- **Standalone** (`/<ulid>`): every `[[Wikilink]]` becomes a "private" pill, opaque, hovers say "not in this published slice."
-- **Scoped** (`/share/<wrap-id>/<ulid>`): for each `[[Target]]`, if `Target` matches the basename of any note in the wrapper's share-set, it becomes a navigable blue link to `/share/<wrap-id>/<other-ulid>` (carrying the access token through the URL if gated). Targets *not* in the share-set stay as private pills.
-
-This is what makes the recipient experience feel like a real navigable subgraph instead of a doc dump.
-
-## Roadmap
-
-Captured in detail in the design vault (companion repo, not this one):
-
-- **Week 4, paused**: LLM-grounded chat on the slice. Tier 0 (server → Anthropic), Tier 1 (BYOK), Tier 1.5 (`brainshare-bridge` npm CLI that spawns `claude -p` against the visitor's own subscription), Tier 2 (Ollama direct), Tier 3 (WebLLM in-browser via WebGPU).
-- **Federation (Layer 4)**: multi-author merged team graph
-- **Polish**: mermaid, syntax highlighting, embedded images, mobile UX
-
-## Contributing
-
-PRs welcome but the codebase is opinionated and small (~1500 LOC TypeScript across three packages). Open an issue first if you want to add a tier (e.g. LLM chat, Quartz mode, federation).
-
-## License
-
-MIT, see [LICENSE](./LICENSE).
+If you see 403 with `error code: 1010`, the User-Agent is the first thing to check — not the token, not the URL.
 
 ---
 
-Built by [@MachoMaheen](https://github.com/MachoMaheen) as a stretch off the [agent-os](https://github.com/MachoMaheen/agent-os) work. Companion design vault, and dogfood, lives in a private Obsidian vault.
+## How wikilinks work in scoped views
+
+| View mode | Wikilink behaviour |
+|---|---|
+| Standalone `/<ulid>` | Every `[[Link]]` renders as a "private" pill — opaque, unclickable, hover says "not in this slice." |
+| Scoped `/share/<wrap-id>/<ulid>` | Links whose target is in the same slice become navigable blue links. Links outside the slice stay as private pills. |
+
+This is what makes the recipient experience feel like a real navigable subgraph instead of a document dump.
+
+---
+
+## Production readiness
+
+| Area | Status |
+|---|---|
+| TypeScript strict, end-to-end | ✅ |
+| JWT auth with revoke / expiry / view-limits | ✅ |
+| Cloudflare edge-replicated KV | ✅ |
+| 33 unit tests — JWT, frontmatter, ULID; all routes smoke-tested | ✅ |
+| Per-IP rate limiting on auth-required write routes | ✅ — KV-based; catches sustained floods (>1 min). Bursts may leak due to KV eventual consistency. For hard ceilings use Cloudflare's paid Rate Limiting or Durable Objects. |
+| Backup / export | ✅ — `GET /api/export` returns NDJSON of all KV keys; `scripts/export.py` for CLI dumps |
+| Full-text search | ✅ — `/api/search?q=` across all published notes in a slice |
+| Agent-readable (llms.txt, JSON-LD, clean HTML) | ✅ |
+| Mermaid diagrams, LaTeX math, syntax highlighting | ❌ — planned |
+| Mobile / full accessibility audit | ❌ — functional but not audited |
+| Multi-tenancy (multiple authors, separate tokens) | ❌ — single `PUBLISHER_TOKEN` per worker; deploy one worker per team or share one token in a secret manager |
+| Obsidian community store | 🟡 — PR #12449 submitted, awaiting review. Install via BRAT in the meantime. |
+
+**TL;DR: production-ready for self-hosted use. You control your data, your token, and your Cloudflare account. Nobody else can touch them.**
+
+---
+
+## Roadmap
+
+- **LLM-grounded slice chat** — Tier 0 (server → Anthropic BYOK), Tier 1 (`brainshare-bridge` CLI that routes to the visitor's own `claude -p` subscription), Tier 2 (Ollama), Tier 3 (WebLLM in-browser via WebGPU)
+- **Federation** — multi-author merged team graph; one shared brain, multiple writers
+- **Company brain** — private, gated, MCP-served slices for teams; AI agents authenticated to read internal knowledge
+- **Polish** — Mermaid diagrams, syntax highlighting, embedded images, deeper mobile UX
+
+---
+
+## Contributing
+
+PRs welcome. The codebase is intentionally small (~1500 LOC TypeScript across three packages) and opinionated. Open an issue first if you want to add a significant tier (LLM chat, federation, Quartz mode).
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+---
+
+Built by [@MachoMaheen](https://github.com/MachoMaheen). The launch announcement — itself a published BrainShare slice — is at https://brainshare-publisher.machomaheen.workers.dev/share/letter.
