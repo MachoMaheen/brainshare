@@ -380,8 +380,8 @@ export class FolderPickerModal extends Modal {
       const file = files[i];
       this.setStatus(`Publishing ${i + 1}/${files.length} — ${file.path}…`);
       try {
-        const ulid = await this.plugin.publishNoteSilent(file);
-        if (ulid) ulids.push(ulid);
+        const r = await this.plugin.publishNoteSilent(file, { force: true });
+        if (r) ulids.push(r.id);
         else failed.push({ path: file.path, reason: "no ULID returned" });
       } catch (e) {
         failed.push({

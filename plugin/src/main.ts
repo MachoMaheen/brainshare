@@ -25,6 +25,25 @@ export interface SliceRecord {
 export type SliceMap = Record<string, SliceRecord>;
 
 export const SLICES_PATH = ".obsidian/brainshare-slices.json";
+export const HASHES_PATH = ".obsidian/brainshare-hashes.json";
+
+/** ulid → content hash of the last successfully pushed note body. */
+export type HashMap = Record<string, string>;
+
+/**
+ * FNV-1a (32-bit) over a UTF-16 code-unit stream. Synchronous, dependency-free,
+ * and fast enough for whole-note bodies. Used only for change-detection (skip
+ * re-PUT of unmodified notes) — not security-sensitive, so a non-crypto hash
+ * with negligible collision risk for this use is the right tradeoff.
+ */
+export function contentHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
 
 interface BrainShareSettings {
   publisherUrl: string;
@@ -158,13 +177,36 @@ export default class BrainSharePlugin extends Plugin {
    * Returns the ULID on success, null on failure. Does NOT show notices —
    * caller decides how to surface results (single note vs bulk).
    */
-  async publishNoteSilent(file: TFile): Promise<string | null> {
+  /**
+   * Push a single note. Returns `{ id, pushed }` where `pushed` is false when
+   * the note was skipped because its content is byte-identical to the last
+   * successful push (change-detection via the hash sidecar). `null` only on
+   * hard failure (no config, no ULID, or a PUT that errored).
+   *
+   * `opts.force` bypasses the skip — used by the explicit single-note publish
+   * command so an intentional "Publish current note" always re-pushes.
+   * `opts.hashes` lets a batch caller (republishSlice) share one in-memory map
+   * and persist it once instead of read/writing the sidecar per note.
+   */
+  async publishNoteSilent(
+    file: TFile,
+    opts?: { force?: boolean; hashes?: HashMap }
+  ): Promise<{ id: string; pushed: boolean } | null> {
     const { publisherUrl, publisherToken } = this.settings;
     if (!publisherUrl || !publisherToken) return null;
     await this.stampUlid(file);
     const id = this.app.metadataCache.getFileCache(file)?.frontmatter?.id;
     if (!id) return null;
     const content = await this.app.vault.read(file);
+    const hash = contentHash(content);
+
+    const ownCache = opts?.hashes === undefined;
+    const hashes = opts?.hashes ?? (await this.readHashes());
+
+    if (!opts?.force && hashes[id] === hash) {
+      return { id, pushed: false };
+    }
+
     const res = await requestUrl({
       url: `${publisherUrl}/api/notes/${id}`,
       method: "PUT",
@@ -176,7 +218,11 @@ export default class BrainSharePlugin extends Plugin {
       body: content,
       throw: false,
     });
-    return res.status < 400 ? id : null;
+    if (res.status >= 400) return null;
+
+    hashes[id] = hash;
+    if (ownCache) await this.writeHashes(hashes);
+    return { id, pushed: true };
   }
 
   /**
@@ -286,7 +332,7 @@ export default class BrainSharePlugin extends Plugin {
   async republishSlice(
     wrapId: string,
     slice: SliceRecord
-  ): Promise<{ pushed: number; missing: string[]; ulids: string[]; resolvedFiles: TFile[] } | null> {
+  ): Promise<{ pushed: number; changed: number; unchanged: number; missing: string[]; ulids: string[]; resolvedFiles: TFile[] } | null> {
     const files: TFile[] = [];
     const missing: string[] = [];
     for (const path of slice.files ?? []) {
@@ -295,14 +341,22 @@ export default class BrainSharePlugin extends Plugin {
       else missing.push(path);
     }
     const ulids: string[] = [];
+    let changed = 0;
+    let unchanged = 0;
+    const hashes = await this.readHashes();
     for (const f of files) {
       try {
-        const u = await this.publishNoteSilent(f);
-        if (u) ulids.push(u);
+        const r = await this.publishNoteSilent(f, { hashes });
+        if (r) {
+          ulids.push(r.id);
+          if (r.pushed) changed++;
+          else unchanged++;
+        }
       } catch (e) {
         console.warn("BrainShare: republish failed to push", f.path, e);
       }
     }
+    await this.writeHashes(hashes);
     if (ulids.length === 0) return null;
     const existing = await this.fetchWrapper(wrapId);
     if (existing.kind === "error") {
@@ -322,7 +376,7 @@ export default class BrainSharePlugin extends Plugin {
       assets: carry?.assets,
     });
     if (!ok) return null;
-    return { pushed: ulids.length, missing, ulids, resolvedFiles: files };
+    return { pushed: ulids.length, changed, unchanged, missing, ulids, resolvedFiles: files };
   }
 
   /**
@@ -391,6 +445,22 @@ export default class BrainSharePlugin extends Plugin {
 
   async writeSlices(data: SliceMap): Promise<void> {
     await this.app.vault.adapter.write(SLICES_PATH, JSON.stringify(data, null, 2));
+  }
+
+  async readHashes(): Promise<HashMap> {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (await adapter.exists(HASHES_PATH)) {
+        return JSON.parse(await adapter.read(HASHES_PATH)) as HashMap;
+      }
+    } catch {
+      // corrupt/missing cache → treat as empty; worst case is a one-time re-push
+    }
+    return {};
+  }
+
+  async writeHashes(data: HashMap): Promise<void> {
+    await this.app.vault.adapter.write(HASHES_PATH, JSON.stringify(data));
   }
 
   /** DELETE /api/notes/:ulid — full takedown of a single note */
@@ -469,7 +539,8 @@ export default class BrainSharePlugin extends Plugin {
       return;
     }
     try {
-      const id = await this.publishNoteSilent(file);
+      const r = await this.publishNoteSilent(file, { force: true });
+      const id = r?.id ?? null;
       if (!id) {
         new Notice("BrainShare: publish failed (check publisher URL/token + console)");
         return;

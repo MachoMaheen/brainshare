@@ -2,6 +2,7 @@ import { App, Modal, Notice, Setting } from "obsidian";
 import type BrainSharePlugin from "./main";
 import type { SliceMap, SliceRecord } from "./main";
 import { FolderPickerModal } from "./folder-picker";
+import { MintTokenModal } from "./mint-modal";
 
 /**
  * SlicesModal — reads .obsidian/brainshare-slices.json and shows every slice
@@ -201,8 +202,12 @@ export class SlicesModal extends Modal {
             files: result.resolvedFiles.map((f) => f.path),
           };
           await this.plugin.writeSlices(this.slices);
-          const missingNote = result.missing.length ? ` (${result.missing.length} missing skipped)` : "";
-          new Notice(`BrainShare: re-published ${result.pushed} → /share/${wrapId}${missingNote}`);
+          const missingNote = result.missing.length ? `, ${result.missing.length} missing` : "";
+          const detail =
+            result.changed === 0
+              ? `nothing changed (${result.unchanged} up to date)`
+              : `${result.changed} updated, ${result.unchanged} unchanged`;
+          new Notice(`BrainShare: ${detail} → /share/${wrapId}${missingNote}`);
           this.renderManage(wrapId);
         })
       );
@@ -223,6 +228,26 @@ export class SlicesModal extends Modal {
           }).open();
         })
       );
+
+    // Access tokens — gated slices only. Without this, a user who closed the
+    // post-publish mint modal had no in-context way back in and assumed the
+    // slice was permanently locked.
+    if (slice.gated) {
+      new Setting(contentEl)
+        .setName("Access tokens")
+        .setDesc(
+          "This slice is gated — viewers need a tokenized link. Mint one per recipient (each has its own jti so you can revoke individually)."
+        )
+        .addButton((b) =>
+          b
+            .setButtonText("Mint access token…")
+            .setCta()
+            .onClick(() => {
+              this.close();
+              new MintTokenModal(this.app, this.plugin, wrapId).open();
+            })
+        );
+    }
 
     // Destructive actions
     new Setting(contentEl)
