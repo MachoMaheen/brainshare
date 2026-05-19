@@ -405,7 +405,9 @@ export class FolderPickerModal extends Modal {
     // For updates, preserve any canvases/assets the wrapper already has —
     // the picker only knows about .md files, so re-PUTing without these
     // would silently wipe slices that were originally bulk-published.
-    let carry: { canvases?: string[]; assets?: Record<string, string> } | null = null;
+    let carry:
+      | { canvases?: string[]; assets?: Record<string, string>; ulids?: string[] }
+      | null = null;
     if (isUpdate) {
       const existing = await this.plugin.fetchWrapper(wrapId);
       if (existing.kind === "error") {
@@ -415,11 +417,25 @@ export class FolderPickerModal extends Modal {
       }
       carry = existing.kind === "ok" ? existing.data : null;
     }
+
+    // Non-destructive update: an "Edit notes" publish must NEVER drop notes
+    // already live in the wrapper. The picker pre-fills from the plugin's
+    // sidecar, which can be incomplete for slices published across sessions
+    // or via the bulk CLI — so unchecked ≠ "remove", it often means "the
+    // picker never knew about it". We union the freshly-published ULIDs with
+    // whatever the live wrapper already had. Intentional removal goes through
+    // the explicit per-note Unpublish button in the slice manager.
+    let finalUlids = ulids;
+    if (isUpdate) {
+      const existingUlids = carry?.ulids ?? [];
+      const seen = new Set(existingUlids);
+      finalUlids = [...existingUlids, ...ulids.filter((u) => !seen.has(u))];
+    }
     try {
       const ok = await this.plugin.publishWrapper(wrapId, {
         title: this.wrapperTitle,
         description: this.wrapperDescription,
-        ulids,
+        ulids: finalUlids,
         gated: this.gated,
         created_at: this.existingSlice?.created_at,
         canvases: carry?.canvases,
@@ -432,8 +448,15 @@ export class FolderPickerModal extends Modal {
       }
       const wrapUrl = `${publisherUrl}/share/${wrapId}`;
       const failNote = failed.length ? ` (${failed.length} failed)` : "";
-      const verb = isUpdate ? "updated" : "published";
-      new Notice(`BrainShare: ${verb} ${ulids.length}/${files.length} → ${wrapUrl}${failNote}`);
+      if (isUpdate) {
+        const kept = finalUlids.length - ulids.length;
+        const keptNote = kept > 0 ? `, ${kept} existing kept` : "";
+        new Notice(
+          `BrainShare: updated — ${ulids.length} pushed${keptNote}, ${finalUlids.length} total → ${wrapUrl}${failNote}`
+        );
+      } else {
+        new Notice(`BrainShare: published ${ulids.length}/${files.length} → ${wrapUrl}${failNote}`);
+      }
       try {
         await navigator.clipboard.writeText(wrapUrl);
       } catch {

@@ -366,17 +366,25 @@ export default class BrainSharePlugin extends Plugin {
       return null;
     }
     const carry = existing.kind === "ok" ? existing.data : null;
+    // Non-destructive: never let a content refresh shrink the wrapper. If the
+    // sidecar's file list is incomplete (slice published across sessions or via
+    // the bulk CLI), `ulids` here would be a subset — union with the live
+    // wrapper's ULIDs so a "Re-publish" can't silently drop reader-visible
+    // notes. Removal is explicit via the per-note Unpublish button.
+    const existingUlids = carry?.ulids ?? [];
+    const seen = new Set(existingUlids);
+    const mergedUlids = [...existingUlids, ...ulids.filter((u) => !seen.has(u))];
     const ok = await this.publishWrapper(wrapId, {
       title: slice.title,
       description: slice.description,
-      ulids,
+      ulids: mergedUlids,
       gated: slice.gated,
       created_at: slice.created_at,
       canvases: carry?.canvases,
       assets: carry?.assets,
     });
     if (!ok) return null;
-    return { pushed: ulids.length, changed, unchanged, missing, ulids, resolvedFiles: files };
+    return { pushed: ulids.length, changed, unchanged, missing, ulids: mergedUlids, resolvedFiles: files };
   }
 
   /**
