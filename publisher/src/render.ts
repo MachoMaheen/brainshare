@@ -2386,7 +2386,7 @@ export function renderTreeSidebar(opts: {
   showDownload?: boolean;
 }): string {
   const tq = opts.tokenQuery;
-  type TreeFile = { kind: "note" | "canvas"; ulid: string; label: string; isActive: boolean };
+  type TreeFile = { kind: "note" | "canvas"; ulid: string; label: string; sortKey: string; isActive: boolean };
   type TreeFolder = { name: string; folders: Map<string, TreeFolder>; files: TreeFile[]; hasActive: boolean };
   const root: TreeFolder = { name: "", folders: new Map(), files: [], hasActive: false };
   function ensureFolder(parts: string[]): TreeFolder[] {
@@ -2410,7 +2410,7 @@ export function renderTreeSidebar(opts: {
     const chain = ensureFolder(parts);
     const isActive = opts.activeUlid === n.ulid;
     (chain.length ? chain[chain.length - 1] : root).files.push({
-      kind: "note", ulid: n.ulid, label: n.title || fileName, isActive,
+      kind: "note", ulid: n.ulid, label: n.title || fileName, sortKey: fileName, isActive,
     });
     if (isActive) for (const f of chain) f.hasActive = true;
   }
@@ -2420,7 +2420,7 @@ export function renderTreeSidebar(opts: {
     const chain = ensureFolder(parts);
     const isActive = opts.activeUlid === c.ulid;
     (chain.length ? chain[chain.length - 1] : root).files.push({
-      kind: "canvas", ulid: c.ulid, label: fileName || c.basename, isActive,
+      kind: "canvas", ulid: c.ulid, label: fileName || c.basename, sortKey: fileName || c.basename, isActive,
     });
     if (isActive) for (const f of chain) f.hasActive = true;
   }
@@ -2431,7 +2431,7 @@ export function renderTreeSidebar(opts: {
   }
   function renderTreeFolder(node: TreeFolder, isRoot: boolean): string {
     const subs = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const files = [...node.files].sort((a, b) => a.label.localeCompare(b.label));
+    const files = [...node.files].sort((a, b) => a.sortKey.localeCompare(b.sortKey, undefined, { numeric: true }));
     const childHtml = subs.map((s) => renderTreeFolder(s, false)).join("") +
       files.map((f) => {
         const href = f.kind === "canvas"
