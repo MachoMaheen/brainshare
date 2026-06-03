@@ -391,10 +391,19 @@ export class FolderPickerModal extends Modal {
       }
     }
 
+    // Always surface failures — partial ones too. Previously this only logged
+    // when EVERY note failed, so a "23/26 (3 failed)" publish gave no clue which
+    // notes or why. Now the path + reason for each is in the console.
+    if (failed.length) {
+      console.warn(
+        `BrainShare: ${failed.length}/${files.length} note(s) failed to publish:`,
+        failed
+      );
+    }
+
     if (ulids.length === 0) {
       new Notice(`BrainShare: 0/${files.length} published`);
       this.setStatus(`Failed all ${files.length}; check console for details`);
-      console.warn("BrainShare folder publish failures:", failed);
       if (this.publishBtn) this.publishBtn.disabled = false;
       return;
     }
