@@ -7,7 +7,7 @@ import {
   Setting,
   requestUrl,
 } from "obsidian";
-import { ulid } from "./ulid";
+import { ulid, isValidUlid } from "./ulid";
 import { FolderPickerModal } from "./folder-picker";
 import { MintTokenModal } from "./mint-modal";
 import { SlicesModal } from "./slices-modal";
@@ -164,7 +164,11 @@ export default class BrainSharePlugin extends Plugin {
   async stampUlid(file: TFile): Promise<boolean> {
     let didStamp = false;
     await this.app.fileManager.processFrontMatter(file, (fm) => {
-      if (!fm.id) {
+      // Stamp when id is missing OR not a valid ULID. A non-ULID id (e.g. a
+      // human slug like "AUTH-ARCH-P1", or a duplicate id: key that parsed to a
+      // non-ULID value) makes the worker PUT /api/notes/<id> 404 — the note then
+      // silently never publishes. Replacing it with a real ULID self-heals that.
+      if (typeof fm.id !== "string" || !isValidUlid(fm.id)) {
         fm.id = ulid();
         didStamp = true;
       }
@@ -218,7 +222,15 @@ export default class BrainSharePlugin extends Plugin {
       body: content,
       throw: false,
     });
-    if (res.status >= 400) return null;
+    if (res.status >= 400) {
+      // Surface WHY — the bulk loop only counts failures, so without this a
+      // rejected note (e.g. 404 on an unknown/garbled id, 413 too-large) is
+      // invisible. Log the path, status, and a body snippet for diagnosis.
+      console.warn(
+        `BrainShare: PUT /api/notes/${id} failed (${res.status}) for "${file.path}" — ${(res.text ?? "").slice(0, 200)}`
+      );
+      return null;
+    }
 
     hashes[id] = hash;
     if (ownCache) await this.writeHashes(hashes);
