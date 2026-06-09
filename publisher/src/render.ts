@@ -3296,14 +3296,22 @@ ${STICKINESS_JS}
 // native size with horizontal scroll; the modal lets the user actually read
 // wide sequence diagrams without squinting.
 const MERMAID_BOOTSTRAP = `<script type="module">
-import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 // Always use the default (light) theme. We don't switch to "dark" based on
 // prefers-color-scheme because the SVG render is one-shot — if the user
 // toggles their OS theme later, the SVG colours can't update, which makes
 // the diagram unreadable on the new background. The .mermaid-host /
 // .mermaid-modal-stage CSS pins the surrounding background to white in
 // both light and dark mode to match.
-mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+mermaid.initialize({
+  startOnLoad: false, theme: "default", securityLevel: "loose",
+  // v11 caps diagrams at 500 edges / 50k chars and refuses to render past that;
+  // lift the ceilings so large architecture flowcharts still render.
+  maxEdges: 2000, maxTextSize: 200000,
+  // Tighter default flowchart layout (v11 dagre) so wide graphs don't sprawl;
+  // per-diagram %%{init}%% directives can still override these.
+  flowchart: { useMaxWidth: true, htmlLabels: true, nodeSpacing: 45, rankSpacing: 55, curve: "basis" },
+});
 
 // Pull a human-readable label from the diagram source. Mermaid sources commonly
 // open with a directive line like "sequenceDiagram" / "graph TD" / "flowchart LR";
