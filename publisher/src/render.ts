@@ -3323,6 +3323,10 @@ function diagramTitle(src) {
   const directive = /^(sequenceDiagram|graph\\b|flowchart\\b|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|xychart\\b)/i;
   for (const line of lines) {
     if (line.startsWith("%%")) {
+      // Skip mermaid config/init directives like %%{init: ...}%% — they configure
+      // the diagram, they're not a human title. (Without this, a leading
+      // %%{init}%% directive becomes the displayed title.)
+      if (line.startsWith("%%{")) continue;
       const cleaned = line.replace(/^%%\\s*/, "").slice(0, 80);
       if (cleaned) return cleaned;
     }
