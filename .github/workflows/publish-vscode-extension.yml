@@ -1,0 +1,36 @@
+name: Publish VS Code Extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "vscode-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run check
+      - run: npm run compile
+      - run: npm run package
+      - name: Publish to Visual Studio Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx vsce publish -p "$VSCE_PAT"
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx ovsx publish brainshare-vscode.vsix -p "$OVSX_PAT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brainshare-vscode
+          path: vscode-extension/brainshare-vscode.vsix
