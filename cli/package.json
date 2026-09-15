@@ -1,0 +1,1 @@
+{"name":"@brainshare/cli","version":"0.2.0","type":"module","bin":{"brainshare":"./brainshare.mjs"},"dependencies":{"@brainshare/core":"0.1.0","@brainshare/protocol":"0.1.0","@brainshare/sdk":"0.1.0"},"scripts":{"test":"node --test test.mjs"}}
