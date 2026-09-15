@@ -99,22 +99,58 @@ async function buildCanvasSet(notes: KVNamespace, ulids: string[]): Promise<Map<
 interface GateOk { ok: true; tokenQuery: string }
 interface GateBlock { ok: false; resp: Response }
 
+function gateCookieName(wrapId: string): string {
+  return `brainshare_${wrapId}`;
+}
+
+function readCookie(req: Request, name: string): string | undefined {
+  const header = req.headers.get("cookie") ?? "";
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key !== name) continue;
+    try { return decodeURIComponent(rest.join("=")); } catch { return rest.join("="); }
+  }
+  return undefined;
+}
+
+function gatedSessionRedirect(url: URL, wrapId: string, token: string, exp: number): Response {
+  const clean = new URL(url.toString());
+  clean.searchParams.delete("t");
+  const now = Math.floor(Date.now() / 1000);
+  const maxAge = Math.max(0, exp - now);
+  const secure = clean.protocol === "https:" ? "; Secure" : "";
+  const cookie = `${gateCookieName(wrapId)}=${encodeURIComponent(token)}; Path=/share/${wrapId}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: clean.toString(),
+      "set-cookie": cookie,
+      "cache-control": "no-store",
+    },
+  });
+}
+
 async function checkGate(
   env: Env,
   wrap: WrapData,
   wrapId: string,
-  url: URL
+  url: URL,
+  req: Request,
+  exchangeQueryToken = false
 ): Promise<GateOk | GateBlock> {
   if (!wrap.gated) return { ok: true, tokenQuery: "" };
 
   if (!env.JWT_SECRET) {
     return { ok: false, resp: html(renderGateError("Server misconfigured: JWT_SECRET not set."), 500) };
   }
-  const t = url.searchParams.get("t");
+
+  const queryToken = url.searchParams.get("t") ?? undefined;
+  const cookieToken = readCookie(req, gateCookieName(wrapId));
+  const t = queryToken ?? cookieToken;
   if (!t) {
     return {
       ok: false,
-      resp: html(renderGateError("This share is gated. A valid access token is required (?t=…)."), 401),
+      resp: html(renderGateError("This share is gated. A valid access token is required."), 401),
     };
   }
   const claims = await verifyJWT<TokenClaims>(t, env.JWT_SECRET);
@@ -131,6 +167,17 @@ async function checkGate(
   if (await env.NOTES.get(`revoked:${claims.jti}`)) {
     return { ok: false, resp: html(renderGateError("This access token has been revoked."), 401) };
   }
+
+  // Browser-facing HTML routes exchange a query token for an HttpOnly
+  // session cookie before any shared Cache API representation is read or
+  // written. This keeps cached HTML viewer-independent: no recipient JWT
+  // is ever embedded in a response that another authorized reader can hit.
+  if (queryToken && exchangeQueryToken) {
+    return { ok: false, resp: gatedSessionRedirect(url, wrapId, queryToken, claims.exp) };
+  }
+
+  // Preserve the existing request-count semantics for gated resources, but
+  // do not count the one-time query-token -> cookie redirect above.
   if (claims.max_views) {
     const c = parseInt((await env.NOTES.get(`views:${claims.jti}`)) ?? "0", 10);
     if (c >= claims.max_views) {
@@ -138,7 +185,9 @@ async function checkGate(
     }
     await env.NOTES.put(`views:${claims.jti}`, String(c + 1));
   }
-  return { ok: true, tokenQuery: `?t=${encodeURIComponent(t)}` };
+
+  // Rendered representations must never carry the viewer credential.
+  return { ok: true, tokenQuery: "" };
 }
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
@@ -561,7 +610,7 @@ export default {
       const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
       if (!wrapRaw) return html("<h1>404</h1><p>wrapper not found</p>", 404);
       const wrap = JSON.parse(wrapRaw) as WrapData;
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req);
       if (!gate.ok) return gate.resp;
 
       const records = await loadNotes(env.NOTES, wrap.ulids);
@@ -608,7 +657,7 @@ export default {
       const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
       if (!wrapRaw) return new Response("not found", { status: 404 });
       const wrap = JSON.parse(wrapRaw) as WrapData;
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req);
       if (!gate.ok) return gate.resp;
 
       const records = await loadNotes(env.NOTES, wrap.ulids);
@@ -684,7 +733,7 @@ export default {
       if (!wrapRaw) return new Response("wrapper not found", { status: 404 });
       const wrap = JSON.parse(wrapRaw) as WrapData;
       if (!wrap.ulids.includes(ulid)) return new Response("note not in this share", { status: 403 });
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req);
       if (!gate.ok) return gate.resp;
 
       const [md, meta] = await Promise.all([
@@ -739,12 +788,12 @@ export default {
       const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
       if (!wrapRaw) return new Response("wrapper not found", { status: 404 });
       const wrap = JSON.parse(wrapRaw) as WrapData;
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req);
       if (!gate.ok) return gate.resp;
 
       const records = await loadNotes(env.NOTES, wrap.ulids);
       const shareBase = `${origin}/share/${wrapId}`;
-      const tq = gate.tokenQuery;
+      const tq = "";
       // ULIDs are time-sortable (Crockford base32 of unix ms), so reverse-sort
       // gives newest-first. Best we can do without per-note updated_at fields.
       const sorted = [...records].sort((a, b) => b.ulid.localeCompare(a.ulid));
@@ -800,7 +849,7 @@ ${entries}
       if (!wrap.canvases?.includes(ulid)) {
         return html("<h1>403</h1><p>canvas not in this share</p>", 403);
       }
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req, true);
       if (!gate.ok) return gate.resp;
 
       const [canvasJson, canvasPath, shareSet, canvasSet, treeNotes, treeCanvases] = await Promise.all([
@@ -815,7 +864,7 @@ ${entries}
       const shareBase = `${origin}/share/${wrapId}`;
       return html(renderCanvas(canvasJson, ulid, {
         shareBase, shareSet, canvasSet,
-        path: canvasPath, tokenQuery: gate.tokenQuery, gated: wrap.gated,
+        path: canvasPath, tokenQuery: "", gated: wrap.gated,
         wrapTree: {
           wrapTitle: wrap.title ?? "Shared slice",
           wrapDesc: wrap.description,
@@ -841,14 +890,14 @@ ${entries}
 
       // Gate check runs BEFORE cache lookup so max_views always increments
       // and auth failures are never served from cache.
-      const gate = await checkGate(env, wrap, wrapId, url);
+      const gate = await checkGate(env, wrap, wrapId, url, req, true);
       if (!gate.ok) return gate.resp;
 
       // ?raw=1 is a different response shape — skip cache for it
       if (url.searchParams.get("raw") !== "1") {
         const ver = await getWrapVersion(env, wrapId);
         // Cache key uses a synthetic URL embedding the version counter.
-        // JWT token is deliberately excluded so gated wraps share one cache entry.
+        // JWT token is excluded from both the cache key and rendered HTML; gated browser sessions use an HttpOnly cookie.
         const cacheKey = new Request(
           `${origin}/__cache/v${ver}/share/${wrapId}/${ulid}`,
           { method: "GET" }
@@ -892,7 +941,7 @@ ${entries}
             canvasSet,
             assets: wrap.assets,
             path: current.path,
-            tokenQuery: gate.tokenQuery,
+            tokenQuery: "",
             gated: wrap.gated,
             wrapTree: {
               wrapTitle: wrap.title ?? "Shared slice",
@@ -942,7 +991,7 @@ ${entries}
             canvasSet,
             assets: wrap.assets,
             path: currentMeta.path,
-            tokenQuery: gate.tokenQuery,
+            tokenQuery: "",
             gated: wrap.gated,
             wrapTree: {
               wrapTitle: wrap.title ?? "Shared slice",
@@ -995,7 +1044,7 @@ ${entries}
       const wrap = JSON.parse(raw) as WrapData;
 
       // Gate check runs BEFORE cache lookup so auth failures are never cached.
-      const gate = await checkGate(env, wrap, id, url);
+      const gate = await checkGate(env, wrap, id, url, req, true);
       if (!gate.ok) return gate.resp;
 
       const ver = await getWrapVersion(env, id);
@@ -1007,7 +1056,7 @@ ${entries}
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
-      const resp = html(await renderWrapper(env.NOTES, origin, id, wrap, gate.tokenQuery));
+      const resp = html(await renderWrapper(env.NOTES, origin, id, wrap, ""));
       resp.headers.set("cache-control", "public, max-age=86400, s-maxage=86400");
       ctx.waitUntil(cache.put(cacheKey, resp.clone()));
       return resp;
