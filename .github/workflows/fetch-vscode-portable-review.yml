@@ -1,0 +1,21 @@
+name: Fetch VS Code portable for review
+
+on:
+  push:
+    branches: [feature/platform-foundation]
+    paths:
+      - ".github/workflows/fetch-vscode-portable-review.yml"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official stable VS Code Linux x64
+        run: |
+          curl -L --fail --retry 3 'https://code.visualstudio.com/sha/download?build=stable&os=linux-x64' -o vscode-linux-x64.tar.gz
+          tar -tzf vscode-linux-x64.tar.gz | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-linux-x64-portable
+          path: vscode-linux-x64.tar.gz
+          retention-days: 1
