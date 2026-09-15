@@ -146,7 +146,9 @@ async function checkGate(
 
   const queryToken = url.searchParams.get("t") ?? undefined;
   const cookieToken = readCookie(req, gateCookieName(wrapId));
-  const t = queryToken ?? cookieToken;
+  const authorization = req.headers.get("authorization") ?? "";
+  const bearerToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : undefined;
+  const t = queryToken ?? cookieToken ?? bearerToken;
   if (!t) {
     return {
       ok: false,
@@ -890,11 +892,12 @@ ${entries}
 
       // Gate check runs BEFORE cache lookup so max_views always increments
       // and auth failures are never served from cache.
-      const gate = await checkGate(env, wrap, wrapId, url, req, true);
+      const rawRequest = url.searchParams.get("raw") === "1";
+      const gate = await checkGate(env, wrap, wrapId, url, req, !rawRequest);
       if (!gate.ok) return gate.resp;
 
       // ?raw=1 is a different response shape — skip cache for it
-      if (url.searchParams.get("raw") !== "1") {
+      if (!rawRequest) {
         const ver = await getWrapVersion(env, wrapId);
         // Cache key uses a synthetic URL embedding the version counter.
         // JWT token is excluded from both the cache key and rendered HTML; gated browser sessions use an HttpOnly cookie.

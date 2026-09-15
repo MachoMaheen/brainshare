@@ -16,6 +16,12 @@ describe("gated shared-cache representation", () => {
     expect(source).toContain('return { ok: true, tokenQuery: "" }');
   });
 
+  it("keeps machine access available without putting credentials in cached HTML", () => {
+    expect(source).toContain('authorization.startsWith("Bearer ")');
+    expect(source).toContain('const rawRequest = url.searchParams.get("raw") === "1"');
+    expect(source).toContain('req, !rawRequest');
+  });
+
   it("still authorizes before Cache API lookup", () => {
     const gate = source.indexOf("const gate = await checkGate", source.indexOf("GET /share/:wrapId/:ulid"));
     const cache = source.indexOf("cache.match(cacheKey)", gate);

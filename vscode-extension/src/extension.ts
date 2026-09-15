@@ -4,15 +4,13 @@ import { apiFromSettings, BrainShareApi, publisherTokenSecretKey } from "./api";
 import { SliceRecord, StateStore } from "./state";
 
 let store: StateStore | undefined;
+let storeRootKey: string | undefined;
 let tree: SliceTreeProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const root = workspaceRoot();
-  if (root) {
-    store = new StateStore(root);
-    tree = new SliceTreeProvider(store);
-    context.subscriptions.push(vscode.window.registerTreeDataProvider("brainshare.slices", tree));
-  }
+  syncStore();
+  tree = new SliceTreeProvider(() => store);
+  context.subscriptions.push(vscode.window.registerTreeDataProvider("brainshare.slices", tree));
 
   register(context, "brainshare.setup", () => setup(context));
   register(context, "brainshare.publishCurrent", (uri?: vscode.Uri) => publishCurrent(context, uri));
@@ -29,7 +27,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   register(context, "brainshare.deleteSlice", (item?: SliceTreeItem) => deleteSlice(context, item?.slice));
   register(context, "brainshare.refresh", () => tree?.refresh());
 
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => syncStore()));
+
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
+    syncStore();
     if (!store || document.languageId !== "markdown") return;
     if (!vscode.workspace.getConfiguration("brainshare").get<boolean>("autoPublishOnSave", false)) return;
     const state = await store.read();
@@ -43,6 +44,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
 
   context.subscriptions.push(vscode.workspace.onDidRenameFiles(async (event) => {
+    syncStore();
     if (!store) return;
     for (const file of event.files) {
       if (!file.oldUri.path.toLowerCase().endsWith(".md") || !file.newUri.path.toLowerCase().endsWith(".md")) continue;
@@ -73,7 +75,17 @@ function workspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
 }
 
+function syncStore(): void {
+  const root = workspaceRoot();
+  const key = root?.toString(true);
+  if (key === storeRootKey) return;
+  storeRootKey = key;
+  store = root ? new StateStore(root) : undefined;
+  tree?.refresh();
+}
+
 function requireStore(): StateStore {
+  syncStore();
   if (!store) throw new Error("Open a folder or workspace before using BrainShare.");
   return store;
 }
@@ -165,12 +177,12 @@ async function publishFolder(context: vscode.ExtensionContext, uri?: vscode.Uri)
   const api = await apiFromSettings(context);
   const published = await publishFiles(context, files);
   const existing = await api.getWrapper(id);
-  const merged = unique([...(existing?.ulids ?? []), ...published.map((p) => p.id)]);
+  const ulids = published.map((p) => p.id);
   const payload = {
     title,
     description,
     gated: visibility.gated,
-    ulids: merged,
+    ulids,
     created_at: existing?.created_at ?? new Date().toISOString(),
     ...(existing?.canvases ? { canvases: existing.canvases } : {}),
     ...(existing?.assets ? { assets: existing.assets } : {}),
@@ -182,7 +194,7 @@ async function publishFolder(context: vscode.ExtensionContext, uri?: vscode.Uri)
     description,
     gated: visibility.gated,
     files: files.map((f) => stateStore.relative(f)),
-    ulids: merged,
+    ulids,
     url: wrapper.url,
     createdAt: payload.created_at,
   };
@@ -229,17 +241,18 @@ async function republishSlice(context: vscode.ExtensionContext, supplied?: Slice
   const slice = supplied ?? await pickSlice(Object.values(state.slices), "Re-publish BrainShare slice");
   if (!slice) return;
   const files: vscode.Uri[] = [];
+  const existingPaths: string[] = [];
   for (const path of slice.files) {
     const uri = vscode.Uri.joinPath(workspaceRoot()!, ...path.split("/"));
-    try { await vscode.workspace.fs.stat(uri); files.push(uri); } catch { /* missing file: preserve remote ULID */ }
+    try { await vscode.workspace.fs.stat(uri); files.push(uri); existingPaths.push(path); } catch { /* deleted files leave the Slice on republish */ }
   }
   const published = await publishFiles(context, files);
   const api = await apiFromSettings(context);
   const existing = await api.getWrapper(slice.id);
   if (!existing) throw new Error(`Slice ${slice.id} no longer exists on the publisher.`);
-  const ulids = unique([...existing.ulids, ...published.map((p) => p.id)]);
+  const ulids = published.map((p) => p.id);
   const wrapper = await api.publishWrapper(slice.id, { ...existing, ulids });
-  await stateStore.upsertSlice({ ...slice, ulids, url: wrapper.url });
+  await stateStore.upsertSlice({ ...slice, files: existingPaths, ulids, url: wrapper.url });
   tree?.refresh();
   void vscode.window.showInformationMessage(`Re-published “${slice.title}”.`);
 }
@@ -356,11 +369,13 @@ function unique<T>(values: T[]): T[] { return [...new Set(values)]; }
 class SliceTreeProvider implements vscode.TreeDataProvider<SliceTreeItem> {
   private readonly changed = new vscode.EventEmitter<SliceTreeItem | undefined | void>();
   readonly onDidChangeTreeData = this.changed.event;
-  constructor(private readonly stateStore: StateStore) {}
+  constructor(private readonly getStateStore: () => StateStore | undefined) {}
   refresh(): void { this.changed.fire(); }
   getTreeItem(element: SliceTreeItem): vscode.TreeItem { return element; }
   async getChildren(): Promise<SliceTreeItem[]> {
-    const state = await this.stateStore.read();
+    const stateStore = this.getStateStore();
+    if (!stateStore) return [];
+    const state = await stateStore.read();
     return Object.values(state.slices)
       .sort((a, b) => a.title.localeCompare(b.title))
       .map((slice) => new SliceTreeItem(slice));

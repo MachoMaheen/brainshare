@@ -9,3 +9,5 @@ test("diffs revisions",()=>{const files={"a.md":"# A"};let m=ensureManifestIdent
 test("portable sha256 matches the standard vector",()=>assert.equal(sha256("abc"),"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
 test("ULIDs are protocol-valid length",()=>assert.match(createUlid(),/^[0-9A-HJKMNP-TV-Z]{26}$/));
 test("builds a mutation-free local knowledge graph",()=>{const g=buildKnowledgeGraph({"README.md":"# Home\n[[API]]","docs/API.md":"# API\n[Home](../README.md)"});assert.equal(g.edges.length,2);assert.deepEqual(g.backlinks["docs/API.md"],["README.md"]);assert.deepEqual(g.outgoing["docs/API.md"],["README.md"])});
+
+test("keeps updatedAt stable when content did not change",()=>{const files={"a.md":"same"};const first=ensureManifestIdentities(base,files),stamp=first.notes["a.md"].updatedAt;const second=ensureManifestIdentities(first,files);assert.equal(second.notes["a.md"].updatedAt,stamp)});

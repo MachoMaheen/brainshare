@@ -7,9 +7,10 @@ import { renderMarkdownLite, parseMarkdown } from "@brainshare/markdown";
 import { buildKnowledgeGraph } from "@brainshare/core";
 import { initProject, publishProjectSlice } from "../../cli/lib.mjs";
 
-const arg=process.argv[2]??process.cwd(),stat=await fs.stat(arg);if(stat.isFile()&&!/\.md$/i.test(arg))throw new Error("BrainShare Viewer opens Markdown files or folders.");const root=stat.isDirectory()?path.resolve(arg):path.dirname(path.resolve(arg)),initial=stat.isFile()?path.basename(arg):null,publicDir=path.join(path.dirname(fileURLToPath(import.meta.url)),"public"),recent=[],clients=new Set(),sessionStartedAt=new Date().toISOString();
-const safe=(p)=>{if(typeof p!=="string")throw new Error("missing path");const abs=path.resolve(root,p);if(abs!==root&&!abs.startsWith(root+path.sep))throw new Error("outside root");return abs};
-async function safeMarkdown(p){if(typeof p!=="string"||!/\.md$/i.test(p))throw new Error("Markdown files only");const abs=safe(p),s=await fs.stat(abs);if(!s.isFile())throw new Error("not a file");return abs;}
+const arg=process.argv[2]??process.cwd(),stat=await fs.stat(arg);if(stat.isFile()&&!/\.md$/i.test(arg))throw new Error("BrainShare Viewer opens Markdown files or folders.");const root=stat.isDirectory()?path.resolve(arg):path.dirname(path.resolve(arg)),realRoot=await fs.realpath(root),initial=stat.isFile()?path.basename(arg):null,publicDir=path.join(path.dirname(fileURLToPath(import.meta.url)),"public"),recent=[],clients=new Set(),sessionStartedAt=new Date().toISOString();
+const inside=(base,target)=>target===base||target.startsWith(base+path.sep);
+const safe=(p)=>{if(typeof p!=="string")throw new Error("missing path");const abs=path.resolve(root,p);if(!inside(root,abs))throw new Error("outside root");return abs};
+async function safeMarkdown(p){if(typeof p!=="string"||!/\.md$/i.test(p))throw new Error("Markdown files only");const abs=safe(p),real=await fs.realpath(abs);if(!inside(realRoot,real))throw new Error("outside root");const s=await fs.stat(real);if(!s.isFile())throw new Error("not a file");return real;}
 async function files(dir=root,out=[]){for(const e of await fs.readdir(dir,{withFileTypes:true})){if([".git","node_modules",".brainshare"].includes(e.name))continue;const a=path.join(dir,e.name);if(e.isDirectory())await files(a,out);else if(e.isFile()&&/\.md$/i.test(e.name))out.push(path.relative(root,a).replace(/\\/g,"/"));}return out.sort()}
 async function markdownMap(){const out={};for(const p of await files())out[p]=await fs.readFile(path.join(root,p),"utf8");return out;}
 function json(res,data,status=200){res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(data))}
