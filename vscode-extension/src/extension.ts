@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { createHash } from "node:crypto";
-import { apiFromSettings, BrainShareApi } from "./api";
+import { apiFromSettings, BrainShareApi, publisherTokenSecretKey } from "./api";
 import { SliceRecord, StateStore } from "./state";
 
 let store: StateStore | undefined;
@@ -41,6 +41,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       console.warn("BrainShare auto-publish failed", error);
     }
   }));
+
+  context.subscriptions.push(vscode.workspace.onDidRenameFiles(async (event) => {
+    if (!store) return;
+    for (const file of event.files) {
+      if (!file.oldUri.path.toLowerCase().endsWith(".md") || !file.newUri.path.toLowerCase().endsWith(".md")) continue;
+      try {
+        await store.renameNote(file.oldUri, file.newUri);
+      } catch (error) {
+        console.warn("BrainShare could not preserve note identity after rename", error);
+      }
+    }
+    tree?.refresh();
+  }));
 }
 
 export function deactivate(): void {}
@@ -66,6 +79,7 @@ function requireStore(): StateStore {
 }
 
 async function setup(context: vscode.ExtensionContext): Promise<void> {
+  if (!workspaceRoot()) throw new Error("Open a folder or workspace before configuring BrainShare.");
   const config = vscode.workspace.getConfiguration("brainshare");
   const currentUrl = config.get<string>("publisherUrl", "");
   const publisherUrl = await vscode.window.showInputBox({
@@ -74,7 +88,12 @@ async function setup(context: vscode.ExtensionContext): Promise<void> {
     value: currentUrl,
     placeHolder: "https://brainshare-publisher.example.workers.dev",
     validateInput: (value) => {
-      try { new URL(value); return undefined; } catch { return "Enter a valid http(s) URL"; }
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol === "https:" || parsed.protocol === "http:" ? undefined : "Use an http(s) URL";
+      } catch {
+        return "Enter a valid http(s) URL";
+      }
     },
   });
   if (!publisherUrl) return;
@@ -85,8 +104,8 @@ async function setup(context: vscode.ExtensionContext): Promise<void> {
   });
   if (!publisherToken) return;
   await config.update("publisherUrl", publisherUrl.replace(/\/$/, ""), vscode.ConfigurationTarget.Workspace);
-  await context.secrets.store("brainshare.publisherToken", publisherToken);
-  void vscode.window.showInformationMessage("BrainShare publisher configured.");
+  await context.secrets.store(publisherTokenSecretKey(), publisherToken);
+  void vscode.window.showInformationMessage("BrainShare publisher configured for this workspace.");
 }
 
 async function publishCurrent(context: vscode.ExtensionContext, uri?: vscode.Uri): Promise<void> {
