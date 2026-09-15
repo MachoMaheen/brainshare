@@ -1,0 +1,174 @@
+{
+  "name": "brainshare",
+  "displayName": "BrainShare",
+  "description": "Publish connected Markdown slices with working links, backlinks, graph context, access control, and stable URLs.",
+  "version": "0.1.0",
+  "publisher": "MachoMaheen",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "keywords": ["markdown", "knowledge", "publish", "documentation", "obsidian", "wikilinks", "second-brain"],
+  "main": "./dist/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MachoMaheen/brainshare.git",
+    "directory": "vscode-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/MachoMaheen/brainshare/issues"
+  },
+  "homepage": "https://github.com/MachoMaheen/brainshare#readme",
+  "activationEvents": [
+    "onView:brainshare.slices",
+    "onCommand:brainshare.setup",
+    "onCommand:brainshare.publishCurrent",
+    "onCommand:brainshare.publishFolder",
+    "onCommand:brainshare.addCurrentToSlice",
+    "onCommand:brainshare.republishSlice",
+    "onCommand:brainshare.copyCurrentUrl",
+    "onCommand:brainshare.openCurrentUrl",
+    "onCommand:brainshare.copySliceUrl",
+    "onCommand:brainshare.openSlice",
+    "onCommand:brainshare.mintToken",
+    "onCommand:brainshare.revokeToken",
+    "onCommand:brainshare.unpublishCurrent",
+    "onCommand:brainshare.deleteSlice",
+    "onCommand:brainshare.refresh"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "brainshare.setup", "title": "BrainShare: Configure Publisher" },
+      { "command": "brainshare.publishCurrent", "title": "BrainShare: Publish Current Markdown File" },
+      { "command": "brainshare.publishFolder", "title": "BrainShare: Publish Folder as Slice" },
+      { "command": "brainshare.addCurrentToSlice", "title": "BrainShare: Add Current File to Slice" },
+      { "command": "brainshare.republishSlice", "title": "BrainShare: Re-publish Slice" },
+      { "command": "brainshare.copyCurrentUrl", "title": "BrainShare: Copy Current Published URL" },
+      { "command": "brainshare.openCurrentUrl", "title": "BrainShare: Open Current Published URL" },
+      { "command": "brainshare.copySliceUrl", "title": "BrainShare: Copy Slice URL" },
+      { "command": "brainshare.openSlice", "title": "BrainShare: Open Slice" },
+      { "command": "brainshare.mintToken", "title": "BrainShare: Mint Slice Access Token" },
+      { "command": "brainshare.revokeToken", "title": "BrainShare: Revoke Slice Access Token" },
+      { "command": "brainshare.unpublishCurrent", "title": "BrainShare: Unpublish Current File" },
+      { "command": "brainshare.deleteSlice", "title": "BrainShare: Delete Slice" },
+      { "command": "brainshare.refresh", "title": "BrainShare: Refresh" }
+    ],
+    "configuration": {
+      "title": "BrainShare",
+      "properties": {
+        "brainshare.publisherUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of your self-hosted BrainShare Cloudflare Worker."
+        },
+        "brainshare.identityMode": {
+          "type": "string",
+          "enum": ["sidecar", "frontmatter"],
+          "enumDescriptions": [
+            "Keep stable ULIDs in .brainshare/manifest.json without changing Markdown files.",
+            "Store the stable ULID in the Markdown frontmatter as id:, compatible with the Obsidian plugin."
+          ],
+          "default": "sidecar",
+          "description": "Where BrainShare stores stable note IDs."
+        },
+        "brainshare.autoPublishOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically re-publish already-known Markdown files when they are saved."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "brainshare",
+          "title": "BrainShare",
+          "icon": "media/brainshare.svg"
+        }
+      ]
+    },
+    "views": {
+      "brainshare": [
+        {
+          "id": "brainshare.slices",
+          "name": "Published Slices"
+        }
+      ]
+    },
+    "menus": {
+      "editor/title/context": [
+        {
+          "command": "brainshare.publishCurrent",
+          "when": "resourceExtname == .md",
+          "group": "navigation@90"
+        },
+        {
+          "command": "brainshare.addCurrentToSlice",
+          "when": "resourceExtname == .md",
+          "group": "navigation@91"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "brainshare.publishCurrent",
+          "when": "resourceExtname == .md",
+          "group": "brainshare@1"
+        },
+        {
+          "command": "brainshare.publishFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "brainshare@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "brainshare.refresh",
+          "when": "view == brainshare.slices",
+          "group": "navigation"
+        },
+        {
+          "command": "brainshare.publishFolder",
+          "when": "view == brainshare.slices",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "brainshare.republishSlice",
+          "when": "view == brainshare.slices && viewItem == brainshare.slice",
+          "group": "inline@1"
+        },
+        {
+          "command": "brainshare.copySliceUrl",
+          "when": "view == brainshare.slices && viewItem == brainshare.slice",
+          "group": "brainshare@1"
+        },
+        {
+          "command": "brainshare.mintToken",
+          "when": "view == brainshare.slices && viewItem == brainshare.slice",
+          "group": "brainshare@2"
+        },
+        {
+          "command": "brainshare.deleteSlice",
+          "when": "view == brainshare.slices && viewItem == brainshare.slice",
+          "group": "brainshare@9"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "check": "tsc --noEmit -p ./",
+    "watch": "tsc -w -p ./",
+    "package": "vsce package --out brainshare-vscode.vsix",
+    "publish:vscode": "vsce publish",
+    "publish:openvsx": "npx --yes ovsx publish"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.0"
+  }
+}
