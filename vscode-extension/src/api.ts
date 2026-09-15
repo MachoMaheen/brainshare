@@ -103,12 +103,22 @@ async function apiError(action: string, res: Response): Promise<Error> {
   return new Error(`BrainShare could not ${action} (${res.status}): ${body || res.statusText}`);
 }
 
+/**
+ * SecretStorage is extension-global, while publisherUrl is workspace-scoped.
+ * Namespace the secret by the current workspace so two projects can safely use
+ * different BrainShare publishers/tokens without overwriting each other.
+ */
+export function publisherTokenSecretKey(): string {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.toString(true) ?? "no-workspace";
+  return `brainshare.publisherToken:${root}`;
+}
+
 export async function apiFromSettings(context: vscode.ExtensionContext): Promise<BrainShareApi> {
   const config = vscode.workspace.getConfiguration("brainshare");
   const baseUrl = config.get<string>("publisherUrl", "").trim();
-  const token = await context.secrets.get("brainshare.publisherToken");
+  const token = await context.secrets.get(publisherTokenSecretKey());
   if (!baseUrl || !token) {
-    throw new Error("BrainShare is not configured. Run “BrainShare: Configure Publisher” first.");
+    throw new Error("BrainShare is not configured for this workspace. Run “BrainShare: Configure Publisher” first.");
   }
   return new BrainShareApi(baseUrl, token);
 }
