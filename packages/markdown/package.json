@@ -1,1 +1,9 @@
-{"name":"@brainshare/markdown","version":"0.1.0","type":"module","main":"dist/index.js","types":"dist/index.d.ts","exports":"./dist/index.js","scripts":{"build":"tsc -p tsconfig.json","test":"node --test test/*.test.mjs"}}
+{
+  "name": "@brainshare/markdown",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "scripts": {"build":"tsc -p tsconfig.json","test":"node --test test/*.test.mjs"}
+}
