@@ -35,6 +35,8 @@ jobs:
         working-directory: vscode-extension
       - run: npm run compile
         working-directory: vscode-extension
+      - run: npm test
+        working-directory: vscode-extension
       - run: npm run package
         working-directory: vscode-extension
       - uses: actions/upload-artifact@v4
