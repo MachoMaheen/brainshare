@@ -22,6 +22,12 @@ describe("gated shared-cache representation", () => {
     expect(source).toContain('req, !rawRequest');
   });
 
+  it("keeps tokenized gated Atom feeds usable without public caching", () => {
+    expect(source).toContain('const feedQueryToken = url.searchParams.get("t")');
+    expect(source).toContain('wrap.gated && feedQueryToken ? `?t=${encodeURIComponent(feedQueryToken)}` : ""');
+    expect(source).toContain('wrap.gated ? "private, no-store" : "public, max-age=600, s-maxage=600"');
+  });
+
   it("still authorizes before Cache API lookup", () => {
     const gate = source.indexOf("const gate = await checkGate", source.indexOf("GET /share/:wrapId/:ulid"));
     const cache = source.indexOf("cache.match(cacheKey)", gate);

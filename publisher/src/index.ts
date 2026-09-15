@@ -795,7 +795,11 @@ export default {
 
       const records = await loadNotes(env.NOTES, wrap.ulids);
       const shareBase = `${origin}/share/${wrapId}`;
-      const tq = "";
+      // Query-token feed subscriptions need self-contained entry links because
+      // feed readers do not share the browser's HttpOnly Slice session cookie.
+      // Credential-bearing feed XML must never enter a shared/public cache.
+      const feedQueryToken = url.searchParams.get("t");
+      const tq = wrap.gated && feedQueryToken ? `?t=${encodeURIComponent(feedQueryToken)}` : "";
       // ULIDs are time-sortable (Crockford base32 of unix ms), so reverse-sort
       // gives newest-first. Best we can do without per-note updated_at fields.
       const sorted = [...records].sort((a, b) => b.ulid.localeCompare(a.ulid));
@@ -834,7 +838,7 @@ ${entries}
       return new Response(xml, {
         headers: {
           "content-type": "application/atom+xml; charset=utf-8",
-          "cache-control": "public, max-age=600, s-maxage=600",
+          "cache-control": wrap.gated ? "private, no-store" : "public, max-age=600, s-maxage=600",
         },
       });
     }
