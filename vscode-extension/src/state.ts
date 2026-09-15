@@ -1,4 +1,11 @@
 import * as vscode from "vscode";
+import {
+  normalizeBrainSharePath,
+  validateProjectManifest,
+  validateSlicesFile,
+  type ProjectManifestV1,
+  type SlicesFileV1,
+} from "@brainshare/protocol";
 import { isValidUlid, ulid } from "./ulid";
 
 export interface NoteRecord {
@@ -25,114 +32,269 @@ export interface WorkspaceState {
   slices: Record<string, SliceRecord>;
 }
 
-const DEFAULT_STATE: WorkspaceState = { version: 1, notes: {}, slices: {} };
+interface AdapterNoteState {
+  url?: string;
+  publishedAt?: string;
+}
+
+interface AdapterState {
+  version: 1;
+  notes: Record<string, AdapterNoteState>;
+  slices: Record<string, SliceRecord>;
+}
+
+const EMPTY_ADAPTER = (): AdapterState => ({ version: 1, notes: {}, slices: {} });
 
 export class StateStore {
   constructor(private readonly root: vscode.Uri) {}
 
   private get dir(): vscode.Uri { return vscode.Uri.joinPath(this.root, ".brainshare"); }
-  private get file(): vscode.Uri { return vscode.Uri.joinPath(this.dir, "manifest.json"); }
+  private get manifestFile(): vscode.Uri { return vscode.Uri.joinPath(this.dir, "manifest.json"); }
+  private get slicesFile(): vscode.Uri { return vscode.Uri.joinPath(this.dir, "slices.json"); }
+  private get adapterFile(): vscode.Uri { return vscode.Uri.joinPath(this.dir, "vscode.json"); }
 
   async read(): Promise<WorkspaceState> {
-    try {
-      const raw = await vscode.workspace.fs.readFile(this.file);
-      const parsed = JSON.parse(Buffer.from(raw).toString("utf8")) as Partial<WorkspaceState>;
-      if (parsed.version !== undefined && parsed.version !== 1) {
-        throw new Error(`Unsupported BrainShare manifest version: ${String(parsed.version)}`);
-      }
-      return {
-        version: 1,
-        notes: parsed.notes ?? {},
-        slices: parsed.slices ?? {},
+    const manifest = await this.readManifest();
+    const adapter = await this.readAdapter();
+    const notes: Record<string, NoteRecord> = {};
+    for (const [path, identity] of Object.entries(manifest.notes)) {
+      notes[path] = {
+        id: identity.id,
+        ...(identity.hash ? { hash: identity.hash } : {}),
+        ...(adapter.notes[path] ?? {}),
       };
-    } catch (error) {
-      if (isFileNotFound(error)) return structuredClone(DEFAULT_STATE);
-      throw new Error(`BrainShare could not read .brainshare/manifest.json: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }
-
-  async write(state: WorkspaceState): Promise<void> {
-    await vscode.workspace.fs.createDirectory(this.dir);
-    const body = Buffer.from(JSON.stringify(state, null, 2) + "\n", "utf8");
-    await vscode.workspace.fs.writeFile(this.file, body);
+    return { version: 1, notes, slices: adapter.slices };
   }
 
   relative(uri: vscode.Uri): string {
-    return vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/");
+    const folder = vscode.workspace.getWorkspaceFolder(uri);
+    if (!folder || folder.uri.toString(true) !== this.root.toString(true)) {
+      throw new Error("BrainShare currently operates on the first workspace folder. Open the Markdown file from that folder or use a separate window.");
+    }
+    return normalizeBrainSharePath(vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/"));
   }
 
   async getOrCreateId(uri: vscode.Uri, identityMode: "sidecar" | "frontmatter"): Promise<string> {
     const path = this.relative(uri);
     const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
     const frontmatterId = readFrontmatterId(text);
+    const manifest = await this.readManifest();
 
-    // Always reuse a valid existing Obsidian/BrainShare id, even in sidecar mode.
-    // This prevents VS Code from accidentally giving the same note a second identity.
+    // Always reuse a valid existing Obsidian/BrainShare id and mirror it into
+    // the universal manifest, even when VS Code is configured for sidecar mode.
     if (frontmatterId && isValidUlid(frontmatterId)) {
-      if (identityMode === "sidecar") {
-        const state = await this.read();
-        if (state.notes[path]?.id !== frontmatterId) {
-          state.notes[path] = { ...(state.notes[path] ?? {}), id: frontmatterId };
-          await this.write(state);
-        }
+      if (manifest.notes[path]?.id !== frontmatterId) {
+        manifest.notes[path] = { ...(manifest.notes[path] ?? {}), id: frontmatterId };
+        await this.writeManifest(manifest);
       }
       return frontmatterId;
     }
 
-    if (identityMode === "frontmatter") {
-      const id = ulid();
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(writeFrontmatterId(text, id), "utf8"));
-      return id;
-    }
-
-    const state = await this.read();
-    const existing = state.notes[path]?.id;
+    const existing = manifest.notes[path]?.id;
     if (existing && isValidUlid(existing)) return existing;
+
     const id = ulid();
-    state.notes[path] = { ...(state.notes[path] ?? {}), id };
-    await this.write(state);
+    if (identityMode === "frontmatter") {
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(writeFrontmatterId(text, id), "utf8"));
+    }
+    manifest.notes[path] = { id };
+    await this.writeManifest(manifest);
     return id;
   }
 
   async recordPublishedNote(uri: vscode.Uri, patch: Partial<NoteRecord> & { id: string }): Promise<void> {
-    const state = await this.read();
     const path = this.relative(uri);
-    state.notes[path] = { ...(state.notes[path] ?? {}), ...patch };
-    await this.write(state);
+    const manifest = await this.readManifest();
+    const previous = manifest.notes[path];
+    manifest.notes[path] = {
+      ...(previous ?? {}),
+      id: patch.id,
+      ...(patch.hash ? { hash: patch.hash } : {}),
+      updatedAt: patch.publishedAt ?? new Date().toISOString(),
+    };
+    await this.writeManifest(manifest);
+
+    const adapter = await this.readAdapter();
+    adapter.notes[path] = {
+      ...(adapter.notes[path] ?? {}),
+      ...(patch.url ? { url: patch.url } : {}),
+      ...(patch.publishedAt ? { publishedAt: patch.publishedAt } : {}),
+    };
+    await this.writeAdapter(adapter);
   }
 
+  /** Clear VS Code publication metadata without destroying the stable note identity. */
   async removeNote(uri: vscode.Uri): Promise<void> {
-    const state = await this.read();
-    delete state.notes[this.relative(uri)];
-    await this.write(state);
+    const adapter = await this.readAdapter();
+    delete adapter.notes[this.relative(uri)];
+    await this.writeAdapter(adapter);
   }
 
   async renameNote(oldUri: vscode.Uri, newUri: vscode.Uri): Promise<void> {
-    const state = await this.read();
     const oldPath = this.relative(oldUri);
     const newPath = this.relative(newUri);
-    const record = state.notes[oldPath];
-    if (!record) return;
-    state.notes[newPath] = record;
-    delete state.notes[oldPath];
-    for (const slice of Object.values(state.slices)) {
-      const index = slice.files.indexOf(oldPath);
-      if (index >= 0) slice.files[index] = newPath;
+
+    const manifest = await this.readManifest();
+    const identity = manifest.notes[oldPath];
+    if (identity) {
+      manifest.notes[newPath] = identity;
+      delete manifest.notes[oldPath];
+      await this.writeManifest(manifest);
     }
-    await this.write(state);
+
+    const adapter = await this.readAdapter();
+    if (adapter.notes[oldPath]) {
+      adapter.notes[newPath] = adapter.notes[oldPath];
+      delete adapter.notes[oldPath];
+    }
+    for (const slice of Object.values(adapter.slices)) {
+      slice.files = slice.files.map((path) => path === oldPath ? newPath : path);
+    }
+    await this.writeAdapter(adapter);
+
+    const slices = await this.readSlices();
+    for (const slice of Object.values(slices.slices)) {
+      slice.include = slice.include.map((path) => path === oldPath ? newPath : path);
+      if (slice.exclude) slice.exclude = slice.exclude.map((path) => path === oldPath ? newPath : path);
+      if (slice.entrypoint === oldPath) slice.entrypoint = newPath;
+      if (slice.pinned) slice.pinned = slice.pinned.map((path) => path === oldPath ? newPath : path);
+    }
+    await this.writeSlices(slices);
   }
 
   async upsertSlice(slice: SliceRecord): Promise<void> {
-    const state = await this.read();
-    state.slices[slice.id] = slice;
-    await this.write(state);
+    const adapter = await this.readAdapter();
+    adapter.slices[slice.id] = slice;
+    await this.writeAdapter(adapter);
+
+    const slices = await this.readSlices();
+    const existing = slices.slices[slice.id];
+    slices.slices[slice.id] = {
+      ...(existing ?? {}),
+      id: slice.id,
+      title: slice.title,
+      description: slice.description,
+      include: [...slice.files],
+      visibility: slice.gated ? "gated" : "unlisted",
+      live: existing?.live ?? true,
+    };
+    await this.writeSlices(slices);
   }
 
   async removeSlice(id: string): Promise<void> {
-    const state = await this.read();
-    delete state.slices[id];
-    await this.write(state);
+    const adapter = await this.readAdapter();
+    delete adapter.slices[id];
+    await this.writeAdapter(adapter);
+
+    const slices = await this.readSlices();
+    if (slices.slices[id]) {
+      delete slices.slices[id];
+      await this.writeSlices(slices);
+    }
   }
+
+  private projectName(): string {
+    const parts = this.root.path.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "BrainShare project";
+  }
+
+  private async readManifest(): Promise<ProjectManifestV1> {
+    try {
+      const raw = await vscode.workspace.fs.readFile(this.manifestFile);
+      const parsed = JSON.parse(Buffer.from(raw).toString("utf8")) as unknown;
+      if (isLegacyWorkspaceState(parsed)) return await this.migrateLegacy(parsed);
+      return validateProjectManifest(parsed);
+    } catch (error) {
+      if (isFileNotFound(error)) {
+        return { version: 1, project: { name: this.projectName(), createdAt: new Date().toISOString() }, notes: {} };
+      }
+      throw new Error(`BrainShare could not read .brainshare/manifest.json: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async readSlices(): Promise<SlicesFileV1> {
+    try {
+      const raw = await vscode.workspace.fs.readFile(this.slicesFile);
+      return validateSlicesFile(JSON.parse(Buffer.from(raw).toString("utf8")));
+    } catch (error) {
+      if (isFileNotFound(error)) return { version: 1, slices: {} };
+      throw new Error(`BrainShare could not read .brainshare/slices.json: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async readAdapter(): Promise<AdapterState> {
+    try {
+      const raw = await vscode.workspace.fs.readFile(this.adapterFile);
+      const parsed = JSON.parse(Buffer.from(raw).toString("utf8")) as Partial<AdapterState>;
+      if (parsed.version !== 1) throw new Error(`Unsupported VS Code adapter state version: ${String(parsed.version)}`);
+      return { version: 1, notes: parsed.notes ?? {}, slices: parsed.slices ?? {} };
+    } catch (error) {
+      if (isFileNotFound(error)) return EMPTY_ADAPTER();
+      throw new Error(`BrainShare could not read .brainshare/vscode.json: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async writeManifest(manifest: ProjectManifestV1): Promise<void> {
+    await this.writeJson(this.manifestFile, manifest);
+  }
+
+  private async writeSlices(slices: SlicesFileV1): Promise<void> {
+    await this.writeJson(this.slicesFile, slices);
+  }
+
+  private async writeAdapter(adapter: AdapterState): Promise<void> {
+    await this.writeJson(this.adapterFile, adapter);
+  }
+
+  private async writeJson(uri: vscode.Uri, value: unknown): Promise<void> {
+    await vscode.workspace.fs.createDirectory(this.dir);
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(value, null, 2) + "\n", "utf8"));
+  }
+
+  private async migrateLegacy(legacy: WorkspaceState): Promise<ProjectManifestV1> {
+    const manifest: ProjectManifestV1 = {
+      version: 1,
+      project: { name: this.projectName(), createdAt: new Date().toISOString() },
+      notes: {},
+    };
+    const adapter = EMPTY_ADAPTER();
+    const slices: SlicesFileV1 = { version: 1, slices: {} };
+
+    for (const [rawPath, record] of Object.entries(legacy.notes ?? {})) {
+      const path = normalizeBrainSharePath(rawPath);
+      if (!record?.id || !isValidUlid(record.id)) throw new Error(`Invalid legacy BrainShare note identity for ${path}`);
+      manifest.notes[path] = {
+        id: record.id,
+        ...(record.hash ? { hash: record.hash } : {}),
+        ...(record.publishedAt ? { updatedAt: record.publishedAt } : {}),
+      };
+      if (record.url || record.publishedAt) adapter.notes[path] = { url: record.url, publishedAt: record.publishedAt };
+    }
+
+    for (const [id, slice] of Object.entries(legacy.slices ?? {})) {
+      adapter.slices[id] = slice;
+      slices.slices[id] = {
+        id,
+        title: slice.title,
+        description: slice.description,
+        include: [...slice.files],
+        visibility: slice.gated ? "gated" : "unlisted",
+        live: true,
+      };
+    }
+
+    await this.writeManifest(manifest);
+    await this.writeSlices(slices);
+    await this.writeAdapter(adapter);
+    return manifest;
+  }
+}
+
+function isLegacyWorkspaceState(value: unknown): value is WorkspaceState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Partial<WorkspaceState> & { project?: unknown };
+  return state.version === 1 && state.project === undefined && !!state.notes && !!state.slices;
 }
 
 function readFrontmatterId(text: string): string | undefined {
