@@ -36,14 +36,18 @@ export class StateStore {
   async read(): Promise<WorkspaceState> {
     try {
       const raw = await vscode.workspace.fs.readFile(this.file);
-      const parsed = JSON.parse(Buffer.from(raw).toString("utf8")) as WorkspaceState;
+      const parsed = JSON.parse(Buffer.from(raw).toString("utf8")) as Partial<WorkspaceState>;
+      if (parsed.version !== undefined && parsed.version !== 1) {
+        throw new Error(`Unsupported BrainShare manifest version: ${String(parsed.version)}`);
+      }
       return {
         version: 1,
         notes: parsed.notes ?? {},
         slices: parsed.slices ?? {},
       };
-    } catch {
-      return structuredClone(DEFAULT_STATE);
+    } catch (error) {
+      if (isFileNotFound(error)) return structuredClone(DEFAULT_STATE);
+      throw new Error(`BrainShare could not read .brainshare/manifest.json: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -59,10 +63,23 @@ export class StateStore {
 
   async getOrCreateId(uri: vscode.Uri, identityMode: "sidecar" | "frontmatter"): Promise<string> {
     const path = this.relative(uri);
+    const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+    const frontmatterId = readFrontmatterId(text);
+
+    // Always reuse a valid existing Obsidian/BrainShare id, even in sidecar mode.
+    // This prevents VS Code from accidentally giving the same note a second identity.
+    if (frontmatterId && isValidUlid(frontmatterId)) {
+      if (identityMode === "sidecar") {
+        const state = await this.read();
+        if (state.notes[path]?.id !== frontmatterId) {
+          state.notes[path] = { ...(state.notes[path] ?? {}), id: frontmatterId };
+          await this.write(state);
+        }
+      }
+      return frontmatterId;
+    }
+
     if (identityMode === "frontmatter") {
-      const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-      const existing = readFrontmatterId(text);
-      if (existing && isValidUlid(existing)) return existing;
       const id = ulid();
       await vscode.workspace.fs.writeFile(uri, Buffer.from(writeFrontmatterId(text, id), "utf8"));
       return id;
@@ -90,6 +107,21 @@ export class StateStore {
     await this.write(state);
   }
 
+  async renameNote(oldUri: vscode.Uri, newUri: vscode.Uri): Promise<void> {
+    const state = await this.read();
+    const oldPath = this.relative(oldUri);
+    const newPath = this.relative(newUri);
+    const record = state.notes[oldPath];
+    if (!record) return;
+    state.notes[newPath] = record;
+    delete state.notes[oldPath];
+    for (const slice of Object.values(state.slices)) {
+      const index = slice.files.indexOf(oldPath);
+      if (index >= 0) slice.files[index] = newPath;
+    }
+    await this.write(state);
+  }
+
   async upsertSlice(slice: SliceRecord): Promise<void> {
     const state = await this.read();
     state.slices[slice.id] = slice;
@@ -114,7 +146,9 @@ function readFrontmatterId(text: string): string | undefined {
 }
 
 function writeFrontmatterId(text: string, id: string): string {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const normalized = text.replace(/\r\n/g, "\n");
+  let next: string;
   if (normalized.startsWith("---\n")) {
     const end = normalized.indexOf("\n---\n", 4);
     if (end >= 0) {
@@ -122,8 +156,16 @@ function writeFrontmatterId(text: string, id: string): string {
       const nextFm = /^id:\s*.*$/m.test(fm)
         ? fm.replace(/^id:\s*.*$/m, `id: ${id}`)
         : `id: ${id}\n${fm}`;
-      return `---\n${nextFm}\n---\n${normalized.slice(end + 5)}`;
+      next = `---\n${nextFm}\n---\n${normalized.slice(end + 5)}`;
+      return eol === "\n" ? next : next.replace(/\n/g, eol);
     }
   }
-  return `---\nid: ${id}\n---\n\n${text}`;
+  next = `---\nid: ${id}\n---\n\n${normalized}`;
+  return eol === "\n" ? next : next.replace(/\n/g, eol);
+}
+
+function isFileNotFound(error: unknown): boolean {
+  const code = (error as { code?: string } | undefined)?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return code === "FileNotFound" || /file\s*not\s*found|enoent/i.test(message);
 }
