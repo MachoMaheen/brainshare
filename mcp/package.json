@@ -1,0 +1,8 @@
+{
+  "name":"@brainshare/mcp",
+  "version":"0.1.0",
+  "type":"module",
+  "bin":{"brainshare-mcp":"server.mjs"},
+  "dependencies":{"@brainshare/core":"0.1.0","@brainshare/markdown":"0.1.0"},
+  "scripts":{"test":"node --test test.mjs"}
+}

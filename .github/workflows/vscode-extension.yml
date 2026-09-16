@@ -1,0 +1,45 @@
+name: VS Code Extension
+
+on:
+  pull_request:
+    paths:
+      - "vscode-extension/**"
+      - "packages/**"
+      - "package.json"
+      - ".github/workflows/vscode-extension.yml"
+  push:
+    branches: [main]
+    paths:
+      - "vscode-extension/**"
+      - "packages/**"
+      - "package.json"
+      - ".github/workflows/vscode-extension.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build shared BrainShare packages
+        run: |
+          npm install
+          npm run build
+      - name: Install extension dependencies
+        run: npm install
+        working-directory: vscode-extension
+      - run: npm run check
+        working-directory: vscode-extension
+      - run: npm run compile
+        working-directory: vscode-extension
+      - run: npm test
+        working-directory: vscode-extension
+      - run: npm run package
+        working-directory: vscode-extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brainshare-vscode
+          path: vscode-extension/brainshare-vscode.vsix

@@ -1,0 +1,1 @@
+{"name":"@brainshare/viewer","version":"0.1.0","type":"module","dependencies":{"@brainshare/markdown":"0.1.0"},"scripts":{"test":"node --test test.mjs","start":"node server.mjs ."}}

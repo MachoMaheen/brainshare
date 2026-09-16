@@ -1,0 +1,12 @@
+{
+  "name": "brainshare-foundation",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "cli", "apps/viewer", "mcp"],
+  "scripts": {
+    "build": "npm run build -w @brainshare/protocol && npm run build -w @brainshare/markdown && npm run build -w @brainshare/core && npm run build -w @brainshare/sdk",
+    "test": "npm run build && npm test -w @brainshare/protocol && npm test -w @brainshare/markdown && npm test -w @brainshare/core && npm test -w @brainshare/sdk && npm test -w @brainshare/cli && npm test -w @brainshare/viewer && npm test -w @brainshare/mcp",
+    "check": "npm test"
+  },
+  "devDependencies": {"typescript":"^5.8.3"}
+}

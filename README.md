@@ -1,275 +1,414 @@
 # BrainShare
 
-**Publish a curated slice of your Obsidian vault as a live URL — wikilinks working, knowledge graph visible — in one click.**
+**The open context layer for Markdown.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-7f6df2.svg)](./LICENSE)
-[![Cloudflare Workers](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
-[![Install via BRAT](https://img.shields.io/badge/BRAT-MachoMaheen%2Fbrainshare-5c2d91)](https://github.com/TfTHacker/obsidian42-brat)
+BrainShare turns local Markdown into **Slices**: curated, stable, permission-aware context that humans can browse and agents can call.
 
-**Live demo →** https://brainshare-publisher.machomaheen.workers.dev/share/letter
-*(That page was published from an Obsidian vault using BrainShare. The page IS the demo.)*
+> **Share the context behind the work.**  
+> Lend your brain. Anyone can read it. Anything can call it.
 
----
+[![License: MIT](https://img.shields.io/badge/current%20license-MIT-7f6df2.svg)](./LICENSE)
+[![Cloudflare Workers](https://img.shields.io/badge/data%20plane-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
+[![Obsidian](https://img.shields.io/badge/client-Obsidian-7c3aed)](./plugin)
+[![VS Code](https://img.shields.io/badge/client-VS%20Code-007acc)](./vscode-extension)
 
-## Why this exists
+**Existing live demo →** https://brainshare-publisher.machomaheen.workers.dev/share/letter
 
-You keep an Obsidian vault as a second brain for a codebase, a product, a research thread. You want to share a *slice* of it — 7 notes, a folder, a curated subgraph — without exposing the whole vault, without forcing the recipient to install Obsidian, and without losing what makes the vault useful: the wikilinks, the graph, the context.
-
-Existing tools (Obsidian Publish, Quartz, Jotbird) publish everything or one note at a time, and don't let you compose multiple people's notes into one shared graph.
-
-BrainShare's bet: **the value of a second brain isn't the notes — it's the curation.** Sharing should be slice-level, URL-driven, and agent-readable. The page is clean HTML at a stable URL: a human can read it in a browser, and an AI agent can read it at the same URL. See the [philosophical anchor](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+> This branch contains the platform-foundation work. The existing Obsidian product remains compatible while BrainShare is being generalized into an editor-neutral platform.
 
 ---
 
-## Features
+## The idea
 
-- **One-click publish** — select notes or folders from a tree modal in Obsidian, name the slice, hit Publish. The whole slice is live on Cloudflare's edge in seconds.
-- **Stable ULID note IDs** — every note gets a permanent ID stamped into its frontmatter; auto-stamped on creation or bulk-stamped for existing vaults.
-- **Working wikilinks** — within a slice, `[[links]]` resolve to navigable URLs. Targets outside the slice render as "private" pills — no broken links, no leaked context.
-- **Force-directed knowledge graph** — every shared slice gets an interactive Sigma.js graph of the notes and their connections. Hover to highlight, drag to explore.
-- **Obsidian-style rendering** — callouts (`> [!note]`, `> [!warning]`, etc.), properties panel, folder breadcrumb, backlinks, full-text search, tags.
-- **JWT-gated shares** — mark any slice `gated: true`, mint per-recipient tokens with expiry, view-count limits, and revocation. Each recipient gets their own token; revoke one without touching the others.
-- **Real API** — `/api/search`, `/api/wraps`, `/api/notes/:ulid`, `/api/feed.xml`. Your slice is queryable, not just readable.
-- **Instant unpublish** — one button in the plugin removes the slice from the edge immediately. Nothing persists without your intent.
-- **Agent-readable** — clean server-side-rendered HTML at a stable URL, `llms.txt`, JSON-LD schemas. Same URL a human reads, an agent can cite.
+Markdown is increasingly the interchange format for human and agent work:
 
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Obsidian vault  (your second brain)                │
-│  ↓ plugin stamps ULIDs into frontmatter             │
-│  ↓ select notes → click Publish                     │
-└─────────────────────────────────────────────────────┘
-                        │  PUT /api/notes/:ulid
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Cloudflare Worker  (publisher/)                    │
-│  · KV-backed, no Postgres, no Redis, no S3          │
-│  · HS256-JWT auth on gated routes                   │
-│  · server-side MD → Obsidian-style HTML             │
-│  · resolves wikilinks against share-set             │
-│  · sigma.js + d3-force graph data                   │
-└─────────────────────────────────────────────────────┘
-                        │  GET /share/:wrap-id
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Anyone with the URL                                │
-│  reads the slice, navigates wikilinks within it,    │
-│  or is an AI agent citing it in context             │
-└─────────────────────────────────────────────────────┘
+```text
+PLAN.md
+PRD.md
+ARCHITECTURE.md
+SECURITY.md
+TEST_REPORT.md
+research/*.md
+notes/*.md
 ```
 
-Three packages, one worker:
+The hard part is no longer creating Markdown. The hard part is turning the right subset into context that is easy to read, safe to share, stable over time, and usable by machines.
 
-| Package | What | Where it runs |
-|---|---|---|
-| `publisher/` | Cloudflare Worker, KV storage, JWT, rendering | Cloudflare edge |
-| `plugin/` | Obsidian plugin — ULID stamper, publish modal, slice manager | Obsidian (Electron) |
-| `wrapper/` | Node CLI — `create / mint / revoke` subcommands | your terminal |
+BrainShare's canonical primitive is a **Slice**.
+
+```text
+                       Slice: "Backend Architecture"
+
+ architecture.md ─────── auth.md
+       │                    │
+       ├──── database.md ───┤
+       │                    │
+       └──── queues.md ─────┘
+
+ stable identities · relationships · backlinks · entrypoint
+ visibility · revision · source paths · content hashes
+```
+
+A Slice is not a ZIP and not just a folder website. BrainShare understands that the Markdown files form **connected knowledge**.
+
+The same logical Slice can be consumed through:
+
+```text
+Browser / hosted reader
+Local BrainShare Viewer
+CLI / CI
+MCP / agent tools
+Editor integrations
+```
 
 ---
 
-## Self-hosted by design
+## What exists today
 
-BrainShare is **self-hosted, single-tenant**. There is no `brainshare.app` to sign up for. Every user runs their own Cloudflare Worker — your notes never touch shared infrastructure. Cloudflare's free tier covers ~100k requests/day per worker, so the cost is $0 for almost everyone.
+### BrainShare Publisher
 
-| You're trying to… | Do this |
-|---|---|
-| **Try it for 30 seconds** | Open the live demo link above. No install. |
-| **Publish your own slices** | [Deploy your worker (10 min, free)](#quickstart) → install the Obsidian plugin → point it at your URL |
-| **Share with a teammate** | They open URLs you send. They don't deploy anything. |
-| **Team with multiple authors** | Run one shared worker; put `PUBLISHER_TOKEN` in a shared secret manager (1Password, Vault). Each author installs the plugin pointing at the same worker. |
+The production data plane is the existing Cloudflare Worker. It stores published knowledge in KV and serves the reader at the edge.
 
-> **Note on tokens:** `PUBLISHER_TOKEN` is full read/write/delete on your worker. Don't share it like a read URL — share slice URLs instead. For per-recipient access control, use JWT-gated wrappers.
+```text
+request
+  ↓
+Cloudflare Worker
+  ↓
+authorization (when gated)
+  ↓
+caches.default          ← rendered edge response
+  ↓ miss
+Workers KV edge cache   ← notes / wrapper / precomputed index
+  ↓ cold miss
+KV backing storage
+```
 
----
+The platform foundation deliberately **does not replace this hot path with D1**.
 
-## Quickstart
+At publish time BrainShare precomputes wrapper indexes/backlinks so a cold note render does not need to fan out across every note in the Slice.
 
-> Zero to a live URL in ~10 minutes. You'll have your own Cloudflare Worker URL and a token only you hold. Your notes go to your KV namespace.
+### Obsidian
 
-### Prerequisites
+The original BrainShare plugin remains a first-class client:
 
-- Cloudflare account (free tier — [cloudflare.com](https://cloudflare.com))
-- Node 20+
-- An Obsidian vault
+- select notes/folders as a curated Slice
+- stable ULID identities
+- scoped wikilinks
+- backlinks and graph
+- public/unlisted/gated sharing
+- canvases and assets
+- instant update/unpublish
 
-### 1. Clone + deploy the worker
+The migration to shared platform packages is intentionally incremental so the working plugin is not destabilized.
+
+### VS Code
+
+The VS Code adapter supports repository-native publishing:
+
+- publish the current Markdown file
+- publish a folder as a Slice
+- add a file to an existing Slice
+- re-publish while preserving the stable URL
+- copy/open published URLs
+- gated token mint/revoke
+- Activity Bar Slice view
+- optional publish-on-save
+- sidecar identities for normal Git repositories
+
+The extension consumes the shared BrainShare SDK/Core instead of defining a second backend protocol.
+
+### BrainShare CLI
+
+The universal CLI is the escape hatch for editors, CI and agents:
 
 ```bash
-git clone https://github.com/MachoMaheen/brainshare ~/Desktop/brainshare
-cd ~/Desktop/brainshare/publisher
+brainshare init
+brainshare slice create architecture --include "README.md,docs/**/*.md"
+brainshare inspect architecture
+brainshare snapshot architecture
+brainshare publish architecture
+brainshare view .
+```
 
+Publishing accepts:
+
+```bash
+BRAINSHARE_PUBLISHER=https://your-worker.example
+BRAINSHARE_TOKEN=your-publisher-token
+```
+
+or the equivalent command flags.
+
+### BrainShare Viewer
+
+The Viewer MVP is deliberately **read-first**, not another Markdown editor.
+
+```bash
+brainshare view .
+# or
+brainshare view ./PLAN.md
+```
+
+Current workflow:
+
+- open a Markdown file or folder
+- render locally
+- navigate wikilinks and relative Markdown links
+- inspect backlinks/outgoing context
+- watch filesystem changes live
+- surface Markdown changed during the current agent/work session
+- select those files and create a Live Slice
+- publish the Slice through the same BrainShare protocol
+
+The local bridge binds to `127.0.0.1`, only exposes the bundled Viewer shell, and restricts project reads to Markdown files inside the selected root.
+
+A native desktop/Tauri shell is a packaging step after this workflow is validated; Slice semantics do not depend on Tauri.
+
+### BrainShare MCP
+
+The local MCP server exposes project knowledge without introducing another AI/chat layer:
+
+- `list_slices`
+- `get_slice`
+- `get_note`
+- `search_notes`
+- `get_context`
+
+BrainShare is the **context/provenance layer**. Claude, Codex, ChatGPT, Cursor or another agent can remain the reasoning interface.
+
+---
+
+## Universal BrainShare project format
+
+For an ordinary repository BrainShare stores its portable state alongside the project instead of modifying every Markdown file:
+
+```text
+.brainshare/
+├── manifest.json
+├── slices.json
+└── snapshots/
+```
+
+Example Slice definition:
+
+```json
+{
+  "version": 1,
+  "slices": {
+    "architecture": {
+      "id": "architecture",
+      "title": "System Architecture",
+      "include": [
+        "README.md",
+        "docs/**/*.md"
+      ],
+      "exclude": [
+        "docs/private/**"
+      ],
+      "entrypoint": "docs/architecture.md",
+      "visibility": "unlisted",
+      "live": true
+    }
+  }
+}
+```
+
+Obsidian can continue using frontmatter identities. Repository-oriented clients can use `.brainshare/manifest.json` instead.
+
+### Identity invariant
+
+**Path is not identity.**
+
+A note can move from:
+
+```text
+docs/auth.md
+```
+
+to:
+
+```text
+architecture/security/authentication.md
+```
+
+while retaining its ULID and therefore its BrainShare identity.
+
+---
+
+## Live Slices and snapshots
+
+A **Live Slice** is a stable definition whose revision changes as the selected source Markdown changes.
+
+A local **snapshot** freezes the compiled manifest and exact Markdown bodies:
+
+```bash
+brainshare snapshot architecture
+```
+
+which writes a self-contained artifact under:
+
+```text
+.brainshare/snapshots/
+```
+
+Hosted immutable revision URLs are a later data-plane feature; the protocol already carries deterministic Slice revisions.
+
+---
+
+## Shared packages
+
+The platform foundation separates product semantics from individual clients:
+
+| Package | Responsibility |
+|---|---|
+| `packages/protocol` | portable manifest, Slice and compiled-revision contracts |
+| `packages/markdown` | frontmatter, links and safe lightweight local rendering semantics |
+| `packages/core` | ULIDs, hashing, graph/backlinks, Slice compilation, revisions and diffs |
+| `packages/sdk` | client for the existing BrainShare Worker API |
+| `cli` | universal author/automation interface |
+| `apps/viewer` | local reader + agent-output watcher |
+| `mcp` | local machine/agent interface |
+| `plugin` | Obsidian adapter |
+| `vscode-extension` | VS Code adapter |
+| `publisher` | Cloudflare Worker data plane and hosted reader |
+
+The architectural rule is:
+
+```text
+Obsidian ─┐
+VS Code ──┤
+Viewer ───┼── BrainShare Core / Protocol ── Publisher
+CLI ──────┤
+MCP ──────┘
+```
+
+not five separate implementations of identity, graph and publishing.
+
+---
+
+## Gated-share cache safety
+
+Gated HTML still benefits from one shared rendered edge representation without sharing one recipient's credential.
+
+For browser-facing gated pages:
+
+```text
+?t=<JWT>
+   ↓ verify signature / slice / expiry / revocation
+302 + scoped HttpOnly session cookie
+   ↓ clean URL
+verify authorization
+   ↓
+caches.default
+```
+
+The JWT is excluded from both the cache key **and rendered cached HTML**. Authorization continues to happen before Cache API lookup.
+
+---
+
+## Build and test the platform foundation
+
+Requires Node 22+.
+
+```bash
+git clone https://github.com/MachoMaheen/brainshare
+cd brainshare
+npm install
+npm test
+```
+
+The root suite builds/tests the shared protocol, Markdown, Core, SDK, CLI, Viewer and MCP packages. Existing Publisher, Obsidian plugin, wrapper and VS Code workflows are also checked in CI.
+
+### VS Code package
+
+```bash
+cd vscode-extension
+npm install
+npm run check
+npm run package
+```
+
+### Publisher
+
+```bash
+cd publisher
+npm ci
+npm test
+npx tsc
+```
+
+---
+
+## Deploy the existing self-hosted Publisher
+
+BrainShare remains self-hostable. The current Worker uses Cloudflare KV for published content and does not require Postgres/Redis.
+
+```bash
+cd publisher
 cp wrangler.toml.example wrangler.toml
 npm install
 npx wrangler login
 
-# Create KV namespaces and paste the IDs into wrangler.toml
-npx wrangler kv namespace create NOTES          # → copy `id`
-npx wrangler kv namespace create NOTES --preview # → copy `preview_id`
+npx wrangler kv namespace create NOTES
+npx wrangler kv namespace create NOTES --preview
 
-# Generate secrets and push them
+# Copy the namespace IDs into wrangler.toml, then set secrets:
 echo $(openssl rand -hex 32) | npx wrangler secret put PUBLISHER_TOKEN
 echo $(openssl rand -hex 32) | npx wrangler secret put JWT_SECRET
 
 npx wrangler deploy
-# → https://brainshare-publisher.<your-subdomain>.workers.dev
 ```
 
-Save the `PUBLISHER_TOKEN` value — Cloudflare won't show it again. Paste it into the plugin settings in step 2.
+Point Obsidian, VS Code or the CLI at the resulting Worker URL.
 
-### 2. Install the Obsidian plugin
-
-**Via BRAT (recommended):**
-
-1. Install **Obsidian42 BRAT** from the community store.
-2. `Cmd+P → "BRAT: Add a beta plugin"` → paste `MachoMaheen/brainshare`.
-3. Enable BrainShare in **Settings → Community plugins**.
-
-**Build from source:**
-
-```bash
-cd ~/Desktop/brainshare/plugin
-npm install && npm run build
-mkdir -p <vault>/.obsidian/plugins/brainshare
-cp manifest.json main.js <vault>/.obsidian/plugins/brainshare/
-```
-
-**Plugin settings** (Settings → BrainShare):
-- **Publisher URL**: your worker URL from step 1
-- **Publisher token**: your `PUBLISHER_TOKEN`
-- **Auto-stamp ULIDs**: on
-
-Run `Cmd+P → "BrainShare: Stamp ULIDs into all notes"` to stamp your existing vault. New notes stamp on creation.
-
-### 3. Publish a slice
-
-**From the plugin:**
-
-`Cmd+P → "BrainShare: Publish slice…"` → pick folders or individual notes from the tree, name the slice, click Publish. A share URL is copied to your clipboard.
-
-**Single note:**
-
-`Cmd+P → "BrainShare: Publish current note"` — the note's direct URL is copied.
-
-### 4. (Optional) JWT-gated shares via CLI
-
-```bash
-cd ~/Desktop/brainshare/wrapper && npm install
-
-# Create a gated wrapper
-npx tsx src/cli.ts create \
-  --ulids 01HX... 01HX... \
-  --title "Q2 architecture notes" \
-  --name q2-arch \
-  --gated \
-  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
-  --token <PUBLISHER_TOKEN>
-
-# Mint a per-recipient token (7 days, 10 views max)
-npx tsx src/cli.ts mint \
-  --wrap q2-arch \
-  --exp-days 7 \
-  --max-views 10 \
-  --viewer "Alice" \
-  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
-  --token <PUBLISHER_TOKEN>
-
-# Revoke one recipient without affecting others
-npx tsx src/cli.ts revoke \
-  --wrap q2-arch \
-  --jti <jti-from-mint> \
-  --publisher https://brainshare-publisher.<subdomain>.workers.dev \
-  --token <PUBLISHER_TOKEN>
-```
+`PUBLISHER_TOKEN` is full write/delete authority. Do not send it to readers; share public/unlisted Slice URLs or mint gated recipient access instead.
 
 ---
 
-## Bulk-publish an entire vault
+## Product direction
 
-`scripts/bulk-publish.py` walks every `.md` in a vault, stamps a ULID if missing, PUTs to the worker, and writes a list of all published ULIDs for use with the CLI.
+BrainShare is being built around three reinforcing loops:
 
-```bash
-python3 scripts/bulk-publish.py \
-  ~/path/to/your-vault \
-  https://brainshare-publisher.<subdomain>.workers.dev \
-  <PUBLISHER_TOKEN>
-```
+1. **Read local context** — especially Markdown produced by humans and coding agents.
+2. **Curate connected context into a Slice.**
+3. **Share the same logical context with humans and machines.**
 
----
+Future protocol-compatible directions include:
 
-## Calling the API directly
+- hosted immutable Snapshot revisions
+- “changed since you last read” Slice diffs
+- signed/provenance manifests and source Git commits
+- context-budget assembly for agents
+- Managed BrainShare Cloud / Managed BYOC
+- team/project brains
+- cross-publisher federation
 
-⚠ **Cloudflare's bot-fight protection on `*.workers.dev` will silently reject requests with default User-Agent strings** (403 with `error code: 1010`). The token is fine, the URL is fine — it's just the UA. Set a custom `User-Agent` on every scripted request.
+These are roadmap directions, not claims about the current release.
 
-```bash
-curl -X PUT \
-  "https://brainshare-publisher.<subdomain>.workers.dev/api/notes/01HXYZ..." \
-  -H "Authorization: Bearer $PUBLISHER_TOKEN" \
-  -H "Content-Type: text/markdown" \
-  -H "X-Note-Path: My Note.md" \
-  -H "User-Agent: my-uploader/1.0" \
-  --data-binary @"My Note.md"
-```
+See:
 
-If you see 403 with `error code: 1010`, the User-Agent is the first thing to check — not the token, not the URL.
+- [`docs/ARCHITECTURE_V1.md`](./docs/ARCHITECTURE_V1.md)
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md)
+- [`docs/LICENSE_STRATEGY.md`](./docs/LICENSE_STRATEGY.md)
 
 ---
 
-## How wikilinks work in scoped views
+## License and commercialization
 
-| View mode | Wikilink behaviour |
-|---|---|
-| Standalone `/<ulid>` | Every `[[Link]]` renders as a "private" pill — opaque, unclickable, hover says "not in this slice." |
-| Scoped `/share/<wrap-id>/<ulid>` | Links whose target is in the same slice become navigable blue links. Links outside the slice stay as private pills. |
+**The repository is currently MIT licensed.** Existing MIT grants remain valid.
 
-This is what makes the recipient experience feel like a real navigable subgraph instead of a document dump.
+The approved product strategy is to evaluate a future community/commercial model (including AGPL-style network copyleft for appropriate components, permissive protocol/SDK surfaces, and a commercial/OEM license), but **this repository has not been relicensed by this platform-foundation work**.
 
----
-
-## Production readiness
-
-| Area | Status |
-|---|---|
-| TypeScript strict, end-to-end | ✅ |
-| JWT auth with revoke / expiry / view-limits | ✅ |
-| Cloudflare edge-replicated KV | ✅ |
-| 33 unit tests — JWT, frontmatter, ULID; all routes smoke-tested | ✅ |
-| Per-IP rate limiting on auth-required write routes | ✅ — KV-based; catches sustained floods (>1 min). Bursts may leak due to KV eventual consistency. For hard ceilings use Cloudflare's paid Rate Limiting or Durable Objects. |
-| Backup / export | ✅ — `GET /api/export` returns NDJSON of all KV keys; `scripts/export.py` for CLI dumps |
-| Full-text search | ✅ — `/api/search?q=` across all published notes in a slice |
-| Agent-readable (llms.txt, JSON-LD, clean HTML) | ✅ |
-| Mermaid diagrams, LaTeX math, syntax highlighting | ❌ — planned |
-| Mobile / full accessibility audit | ❌ — functional but not audited |
-| Multi-tenancy (multiple authors, separate tokens) | ❌ — single `PUBLISHER_TOKEN` per worker; deploy one worker per team or share one token in a secret manager |
-| Obsidian community store | 🟡 — PR #12449 submitted, awaiting review. Install via BRAT in the meantime. |
-
-**TL;DR: production-ready for self-hosted use. You control your data, your token, and your Cloudflare account. Nobody else can touch them.**
+Any license migration should happen only after copyright/contributor review and proper legal review. See [`docs/LICENSE_STRATEGY.md`](./docs/LICENSE_STRATEGY.md).
 
 ---
 
-## Roadmap
+## Why BrainShare
 
-- **LLM-grounded slice chat** — Tier 0 (server → Anthropic BYOK), Tier 1 (`brainshare-bridge` CLI that routes to the visitor's own `claude -p` subscription), Tier 2 (Ollama), Tier 3 (WebLLM in-browser via WebGPU)
-- **Federation** — multi-author merged team graph; one shared brain, multiple writers
-- **Company brain** — private, gated, MCP-served slices for teams; AI agents authenticated to read internal knowledge
-- **Polish** — Mermaid diagrams, syntax highlighting, embedded images, deeper mobile UX
+Single-file Markdown publishing is useful. Folder publishing is useful. A viewer is useful. MCP is useful.
 
----
+None of those alone is the moat.
 
-## Contributing
+BrainShare's bet is that the durable primitive is **curated context**:
 
-PRs welcome. The codebase is intentionally small (~1500 LOC TypeScript across three packages) and opinionated. Open an issue first if you want to add a significant tier (LLM chat, federation, Quartz mode).
-
----
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
-
----
-
-Built by [@MachoMaheen](https://github.com/MachoMaheen). The launch announcement — itself a published BrainShare slice — is at https://brainshare-publisher.machomaheen.workers.dev/share/letter.
+> the right Markdown, with stable identity, relationships, scope, permissions and revision — readable by a person and callable by an agent.

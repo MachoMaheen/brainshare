@@ -1,0 +1,5 @@
+{
+  "name":"@brainshare/sdk","version":"0.1.0","type":"commonjs","main":"dist/index.js","types":"dist/index.d.ts","exports":"./dist/index.js",
+  "dependencies":{"@brainshare/protocol":"file:../protocol"},
+  "scripts":{"build":"tsc -p tsconfig.json","test":"node --test test/*.test.mjs"}
+}

@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { compileSlice, diffSlices, ensureManifestIdentities, selectSlicePaths, sha256, createUlid, buildKnowledgeGraph } from "../dist/index.js";
+const base={version:1,project:{name:"demo"},notes:{}};
+test("selects include/exclude patterns",()=>{const d={id:"x",title:"X",include:["docs/**/*.md"],exclude:["docs/private/**"]};assert.deepEqual(selectSlicePaths(d,["docs/a.md","docs/x/b.md","docs/private/s.md"]),["docs/a.md","docs/x/b.md"])});
+test("compiles graph and backlinks",()=>{const files={"docs/a.md":"# A\n[[B]]","docs/b.md":"# B\n[A](a.md)"};const m=ensureManifestIdentities(base,files);const s=compileSlice(m,{id:"arch",title:"Arch",include:["docs/*.md"]},files);assert.equal(s.files.length,2);assert.equal(s.edges.length,2);assert.equal(Object.values(s.backlinks).flat().length,2)});
+test("preserves id on content-identical rename",()=>{const m=ensureManifestIdentities(base,{"a.md":"same"});const id=m.notes["a.md"].id;const next=ensureManifestIdentities(m,{"b.md":"same"});assert.equal(next.notes["b.md"].id,id)});
+test("diffs revisions",()=>{const files={"a.md":"# A"};let m=ensureManifestIdentities(base,files);const d={id:"x",title:"X",include:["*.md"]};const a=compileSlice(m,d,files);const files2={"a.md":"# A\nchanged"};m=ensureManifestIdentities(m,files2);const b=compileSlice(m,d,files2);assert.equal(diffSlices(a,b).changed.length,1)});
+test("portable sha256 matches the standard vector",()=>assert.equal(sha256("abc"),"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+test("ULIDs are protocol-valid length",()=>assert.match(createUlid(),/^[0-9A-HJKMNP-TV-Z]{26}$/));
+test("builds a mutation-free local knowledge graph",()=>{const g=buildKnowledgeGraph({"README.md":"# Home\n[[API]]","docs/API.md":"# API\n[Home](../README.md)"});assert.equal(g.edges.length,2);assert.deepEqual(g.backlinks["docs/API.md"],["README.md"]);assert.deepEqual(g.outgoing["docs/API.md"],["README.md"])});
+
+test("keeps updatedAt stable when content did not change",()=>{const files={"a.md":"same"};const first=ensureManifestIdentities(base,files),stamp=first.notes["a.md"].updatedAt;const second=ensureManifestIdentities(first,files);assert.equal(second.notes["a.md"].updatedAt,stamp)});
