@@ -55,6 +55,12 @@ class PreflightTests(unittest.TestCase):
         r=scan_vault(self.root)
         self.assertIn("unsupported_or_spoofed_image",self.codes(r))
 
+    def test_rejects_embedded_image_metadata(self):
+        self.put("meta.png", PNG + b"tEXt" + b"EXIF_PRIVATE_CANARY")
+        report = scan_vault(self.root)
+        self.assertIn("embedded_image_metadata",self.codes(report))
+        self.assertNotIn("EXIF_PRIVATE_CANARY",str(report))
+
     def test_missing_or_excluded_assets_rejected(self):
         self.put("README.md","# Public\n![logo](private/logo.png)")
         r=scan_vault(self.root)
