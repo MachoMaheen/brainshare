@@ -1,0 +1,15 @@
+# Local-only disposable Worker smoke test.
+# This file must not be used for deployment or with real secrets.
+name = "brainshare-smoke-local"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+workers_dev = false
+
+[[kv_namespaces]]
+binding = "NOTES"
+id = "00000000000000000000000000000001"
+preview_id = "00000000000000000000000000000001"
+
+[vars]
+PUBLISHER_TOKEN = "synthetic-smoke-publisher-token"
+JWT_SECRET = "synthetic-smoke-hmac-secret-never-for-production"

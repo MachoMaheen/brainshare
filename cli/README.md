@@ -9,7 +9,8 @@ node cli/brainshare.mjs init
 node cli/brainshare.mjs slice create architecture --title "Architecture" --include "README.md,docs/**/*.md" --exclude "docs/private/**"
 node cli/brainshare.mjs inspect architecture
 node cli/brainshare.mjs snapshot architecture
-BRAINSHARE_PUBLISHER=https://... BRAINSHARE_TOKEN=... node cli/brainshare.mjs publish architecture
+node cli/brainshare.mjs preflight architecture
+BRAINSHARE_PUBLISHER=https://... BRAINSHARE_TOKEN=... node cli/brainshare.mjs publish architecture --confirm-publication --revision REVISION_FROM_PREFLIGHT
 node cli/brainshare.mjs view .
 ```
 
