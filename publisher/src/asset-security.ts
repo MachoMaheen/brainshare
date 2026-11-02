@@ -16,6 +16,13 @@ export function sniffSafeImage(bytes: Uint8Array): string | null {
   // SVG, XML, HTML, PDF, and all unknown or polyglot formats fail closed.
   return null;
 }
+export function hasEmbeddedImageMetadata(bytes:Uint8Array):boolean {
+  // Avoid serving EXIF/XMP and PNG textual chunks as part of publication.
+  // This is intentionally conservative and does not replace a metadata scrubber.
+  const markers=["Exif","exif","eXIf","tEXt","iTXt","zTXt","XMP","xmp","http://ns.adobe.com/xap"];
+  const text=new TextDecoder("latin1").decode(bytes);
+  return markers.some(marker=>text.includes(marker));
+}
 export function safeStoredImageMime(metadata: unknown): string | null {
   if (!metadata || typeof metadata!=="object") return null;
   const value=(metadata as {contentType?:unknown}).contentType;
