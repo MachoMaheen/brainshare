@@ -8,6 +8,7 @@ const HIDDEN="01HX0000000000000000000002";
 const KEY="a".repeat(64);
 const OTHER="b".repeat(64);
 const CANARY="EXCLUDED_SECRET_CANARY_7851";
+const PNG=Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="),c=>c.charCodeAt(0));
 
 function setup() {
   const data=new Map<string,unknown>([
@@ -18,7 +19,7 @@ function setup() {
     ["wrap:public",JSON.stringify({title:"Public",ulids:[PUB],assets:{"diagram.png":KEY},gated:false})],
     ["wrap:gated",JSON.stringify({title:"Gated",ulids:[HIDDEN],assets:{"private.png":KEY},gated:true})],
     ["noterefs:"+HIDDEN,JSON.stringify(["gated"])],
-    ["asset:"+KEY,new TextEncoder().encode("synthetic-image").buffer],
+    ["asset:"+KEY,PNG.buffer],
   ]);
   const kv={
     get:async(key:string)=>data.get(key)??null,
