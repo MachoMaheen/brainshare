@@ -78,7 +78,7 @@ test("bundled extension preserves universal manifest and stable identity", async
     let manifest=JSON.parse(await fs.readFile(path.join(root,".brainshare","manifest.json"),"utf8"));
     assert.equal(manifest.project.name,"demo");
     assert.equal(manifest.notes["README.md"].id,id);
-    assert.equal(typeof manifest.notes["README.md"].hash,"string");
+    assert.equal(typeof manifest.notes["README.md"].hash,"string",JSON.stringify({calls,errors,manifest}));
     assert.equal("slices" in manifest,false);
     const adapter=JSON.parse(await fs.readFile(path.join(root,".brainshare","vscode.json"),"utf8"));
     assert.match(adapter.notes["README.md"].url,/publisher\.test/);
