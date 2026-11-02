@@ -1092,7 +1092,7 @@ ${entries}
 
 ## About
 - Name: BrainShare
-- License: MIT
+- License: AGPL-3.0-only
 - Author: Maheen (https://github.com/MachoMaheen)
 - Repo: https://github.com/MachoMaheen/brainshare
 - Install: BRAT MachoMaheen/brainshare (beta) or Obsidian community store (PR #12449, in review)
@@ -1126,7 +1126,7 @@ BrainShare is an alternative to Obsidian Publish (the paid Obsidian SaaS, $96/ye
 ## Self-host (the only tier)
 - Price: $0/month forever
 - Limits: Cloudflare free tier (100,000 KV reads/day, 1,000 writes/day, 1 GB storage per namespace)
-- Features: full renderer, JWT-gated sharing, full-text search, RSS, canvases, mermaid, knowledge graph, MIT-licensed source
+- Features: full renderer, JWT-gated sharing, full-text search, RSS, canvases, mermaid, knowledge graph, AGPL-3.0-licensed source
 
 There is no paid tier. There is no signup. There is no sales call.
 
@@ -1138,7 +1138,7 @@ If you exceed Cloudflare's free tier, upgrade your Cloudflare plan (Workers Paid
 - Source: https://github.com/MachoMaheen/brainshare
 
 ## Compare
-- vs Obsidian Publish: BrainShare $0, self-hostable, MIT, with API and per-recipient gating. Obsidian Publish $96/year, vendor-hosted, closed source.
+- vs Obsidian Publish: BrainShare $0, self-hostable, AGPLv3, with API and per-recipient gating. Obsidian Publish $96/year, vendor-hosted, closed source.
 `;
       return new Response(body, {
         status: 200,
@@ -1421,7 +1421,7 @@ details.api-ref code { background: var(--code-bg); padding: 1px 6px; border-radi
 <body>
 <header class="hero">
   <div class="wrap">
-    <div class="brand"><span class="brand-dot"></span>BrainShare · open source · MIT</div>
+    <div class="brand"><span class="brand-dot"></span>BrainShare · open source · AGPLv3</div>
     <h1>Lend your brain.</h1>
     <p class="tagline-emphatic"><span class="accent">Anyone</span> can read it. <span class="accent">Anything</span> can call it.</p>
     <p class="tagline">Pick notes and canvases from your Obsidian vault. Get a URL with an interactive graph, full-text search, and per-recipient JWT access — readable by humans, queryable by agents. Free. No vendor lock-in.</p>
@@ -1508,7 +1508,7 @@ wrangler deploy</pre>
 
 <footer>
   <div class="wrap">
-    <a href="${repoUrl}">github.com/MachoMaheen/brainshare</a> · MIT
+    <a href="${repoUrl}">github.com/MachoMaheen/brainshare</a> · AGPLv3
     <details class="api-ref">
       <summary>API reference (for integrators)</summary>
       <ul>
