@@ -41,6 +41,8 @@ def detect_image(data: bytes) -> str | None:
     if data.startswith(b"BM"): return "image/bmp"
     return None
 
+METADATA_MARKERS = (b"Exif",b"exif",b"eXIf",b"tEXt",b"iTXt",b"zTXt",b"XMP",b"xmp",b"http://ns.adobe.com/xap")
+
 MIME_BY_EXT = {
     ".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg",
     ".gif":"image/gif", ".webp":"image/webp", ".avif":"image/avif", ".bmp":"image/bmp"
@@ -102,6 +104,8 @@ def scan_vault(root: Path) -> dict:
                 mime = MIME_BY_EXT.get(ext)
                 if actual is None or actual != mime:
                     fail("unsupported_or_spoofed_image",rel)
+                if any(marker in data for marker in METADATA_MARKERS):
+                    fail("embedded_image_metadata",rel)
                 basename=unicodedata.normalize("NFKC",f.name).casefold()
                 if basename in basenames and basenames[basename]!=rel:
                     fail("ambiguous_asset_basename",rel)
