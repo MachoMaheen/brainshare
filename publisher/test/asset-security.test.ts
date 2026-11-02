@@ -45,7 +45,7 @@ describe("binary upload and scoped media restrictions",()=>{
   expect((await upload("/api/assets/"+key,new TextEncoder().encode("<svg/>"),"image/svg+xml")).status).toBe(415);
   expect((await upload("/api/assets/"+"0".repeat(64),PNG,"image/png")).status).toBe(400);
   expect((await upload("/api/assets/"+key,PNG,"image/png",false)).status).toBe(403);
-  expect((await upload("/api/assets/ab1234",PNG,"image/png")).status).toBe(400);
+  expect((await upload("/api/assets/ab1234",PNG,"image/png")).status).toBe(404); // malformed route does not match
  });
  it("does not execute or serve legacy SVG values through scoped asset URLs",async()=>{
   const {map,request}=setup();const key="a".repeat(64);
