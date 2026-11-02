@@ -87,7 +87,15 @@ export async function createHandoff(root, slice, options) {
   };
   const dir = directory(root);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  if (!(await fs.lstat(dir)).isDirectory()) throw new Error("Handoff directory must not be a symlink");
+  const dirStat = await fs.lstat(dir);
+  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) throw new Error("Handoff directory must not be a symlink");
+  // These records can contain sensitive task context; do not stage them by accident.
+  const ignorePath = path.join(dir, ".gitignore");
+  try {
+    await fs.writeFile(ignorePath, "*\\n!.gitignore\\n", { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
   const filename = slice.id + "-" + new Date().toISOString().replace(/[:.]/g, "-") + "-" + handoff.id.slice(0, 8) + ".json";
   const file = path.join(dir, filename);
   await fs.writeFile(file, JSON.stringify(handoff, null, 2) + "\n", { mode: 0o600, flag: "wx" });
