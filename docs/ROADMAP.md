@@ -1,53 +1,33 @@
-# BrainShare execution roadmap
+# BrainShare roadmap
 
-## Product thesis
+This is a contributor-facing engineering roadmap. Scope and order may change based on testing and community feedback.
 
-**BrainShare is the open context layer for Markdown.** The Viewer gets users in; the Slice makes BrainShare different; managed Cloud/BYOC funds the product; human + machine representations grow the ecosystem; federation is the long-term moat.
+## Foundation (available)
 
-## P0 — re-foundation (this branch)
+- Editor-neutral Slice protocol and shared Markdown/core packages.
+- Stable note identifiers, backlinks and deterministic Slice revisions.
+- Cloudflare Worker publisher and Obsidian integration.
+- CLI, local Viewer, read-only MCP tools and VS Code adapter.
+- Local handoff creation with Git/Slice freshness checks.
+- Read-only GitHub Actions evidence for the exact recorded commit.
 
-- editor-neutral protocol v1
-- portable stable identity + Slice compiler
-- Markdown link/backlink graph extraction
-- deterministic Slice revisions and diffs
-- publisher SDK compatible with the existing Worker APIs
-- universal CLI
-- local Viewer MVP + agent-output watcher
-- preserve Worker + Cache API + KV data plane
-- reconcile the platform foundation with AGPL-3.0-only after the repository license migration; preserve prior MIT release rights
+## Quality and compatibility
 
-## P1 — adapter convergence
+- Improve editor compatibility and migration between Obsidian and repository-oriented projects.
+- Expand publishing and rendering compatibility tests.
+- Strengthen safe-to-share preview, access controls, and asset handling.
+- Improve installation guidance, accessibility and error messages.
 
-- migrate VS Code network/identity logic onto shared packages
-- migrate Obsidian publishing semantics onto shared packages without breaking vault compatibility
-- formalize `.brainshare/manifest.json` and `slices.json` migration rules
-- official Obsidian community release
-- VS Code + Open VSX release
+## Versioned context
 
-## P2 — Viewer product
+- Portable immutable Slice snapshots and source references.
+- Revision comparisons and change summaries.
+- Small, scoped context delivery for authorized human and machine readers.
 
-- package the validated local Viewer in Tauri for Windows/macOS/Linux
-- file association, folder open, OS-native recent projects
-- rich GFM/mermaid/callouts/relative assets
-- Agent Session view and changed-this-session grouping
-- create/publish Live Slice from Viewer
+## Collaboration and interoperability
 
-## P3 — managed product
+- Better documentation for external integrations and public APIs.
+- Clear project and recipient access controls before adding multi-author features.
+- Maintain compatibility with existing self-hosted deployments.
 
-- BrainShare Cloud free + inexpensive Personal plan
-- Managed BYOC provisioning for Cloudflare
-- custom domains/history/analytics on paid tiers
-- permanent free public links; monetize capacity/private/history rather than link expiry
-
-## P4+ — context intelligence and teams
-
-- immutable Snapshot Slices
-- "changed since last read" and graph-aware diffs
-- MCP/API over the same Slice revision
-- context-budget assembly
-- team Project Brains
-- cross-publisher federation only after the earlier workflows prove demand
-
-## Validation gates
-
-Track: first-publish completion, time to first Slice, % of publishers creating 3+ note Slices, 7-day repeat publishing, Viewer→Slice conversion, returning recipients, and managed-hosting demand. If usage stays mostly single-file publishing, the differentiation thesis is not working.
+Contributions, issues and pull requests should describe reproducible behavior, implementations, tests and documentation—not unpublished internal planning.
