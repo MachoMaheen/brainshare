@@ -92,7 +92,7 @@ export async function createHandoff(root, slice, options) {
   // These records can contain sensitive task context; do not stage them by accident.
   const ignorePath = path.join(dir, ".gitignore");
   try {
-    await fs.writeFile(ignorePath, "*\\n!.gitignore\\n", { flag: "wx", mode: 0o600 });
+    await fs.writeFile(ignorePath, "*\n!.gitignore\n", { flag: "wx", mode: 0o600 });
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
   }
