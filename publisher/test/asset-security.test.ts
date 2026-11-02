@@ -47,6 +47,14 @@ describe("binary upload and scoped media restrictions",()=>{
   expect((await upload("/api/assets/"+key,PNG,"image/png",false)).status).toBe(403);
   expect((await upload("/api/assets/ab1234",PNG,"image/png")).status).toBe(404); // malformed route does not match
  });
+ it("rejects synthetic metadata chunks in otherwise recognized raster images",async()=>{
+  const {request}=setup();
+  const payload=new Uint8Array([...PNG,...new TextEncoder().encode("tEXtEXIF_PRIVATE_CANARY")]);
+  const key=await digestSha256Hex(payload.buffer as ArrayBuffer);
+  const response=await request("/api/assets/"+key,{method:"PUT",
+    headers:{authorization:"Bearer synthetic-owner-token","content-type":"image/png"},body:payload});
+  expect(response.status).toBe(415);
+ });
  it("does not execute or serve legacy SVG values through scoped asset URLs",async()=>{
   const {map,request}=setup();const key="a".repeat(64);
   map.set("wrap:public",{value:JSON.stringify({title:"Public",ulids:[],assets:{"legacy.svg":key},gated:false})});
