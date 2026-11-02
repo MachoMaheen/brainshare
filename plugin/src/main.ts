@@ -600,6 +600,13 @@ class BrainShareSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "BrainShare" });
+    const licenseNotice = containerEl.createEl("p", {
+      text: "BrainShare is open source under GNU AGPLv3. ",
+    });
+    licenseNotice.createEl("a", {
+      text: "Source code and license",
+      href: "https://github.com/MachoMaheen/brainshare",
+    });
 
     new Setting(containerEl)
       .setName("Publisher URL")
