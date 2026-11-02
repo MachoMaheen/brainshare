@@ -1,89 +1,114 @@
-# Agent continuity: research and product decision (November 2026)
+# BrainShare agent-continuity research and launch decision
+Updated: 2026-11-02
 
-## Decision
+## Product decision
 
-**Ship Verified Handoff v1 before attempting a shared-memory database or autonomous agent runner.** Keep BrainShare's Slice primitive as the portable context package. Treat agent histories as untrusted inputs, project code and CI as independent evidence, and user-approved decisions as separate records. Explore Hivemind as an *optional adapter* only after a reliable handoff workflow is validated.
+**Positioning:** BrainShare helps teams share *the trustworthy state of a project*, not merely accumulated chat history.
 
-This is a qualitative, non-representative scan of developer discussions and public product documents; it is **not** a paid-demand study.
+**Wedge:** local, scoped, portable Verified Handoff tied to a BrainShare Slice and Git revision, readable by humans and agent clients. The current v1 is deliberately a *freshness-checked handoff*, not an independently verified CI result. Do not market this version as guaranteeing completion or proof.
 
-## Developer research: repeated patterns
+**What not to copy:** cross-agent transcript ingestion, auto-generated summaries, skill mining and org-wide memory already exist in Deep Lake Hivemind, and native assistants provide memory and automated handoffs. Build adapters after demonstrating value.
 
-| Evidence | Reported problem | Caveat |
+## Evidence audit (verified public links, November 2026)
+
+Evidence below is qualitative and self-selected. It establishes pain points and competition, **not market size or willingness to pay**.
+
+| Source | Observed problem or counterevidence | Decision |
 | --- | --- | --- |
-| [r/ClaudeCode: handoff context exhausting](https://www.reddit.com/r/ClaudeCode/comments/1uefjj1/) | Large summaries consume context and degrade usefulness | Outcome depended partly on model context-window size |
-| [r/cursor: context rot](https://www.reddit.com/r/cursor/comments/1r1veb4/) | Long sessions lose constraints; maintaining instruction files becomes work | Self-selected complaint |
-| [r/cursor: Claude↔Cursor handoff](https://www.reddit.com/r/cursor/comments/1stt6i0/) | Cross-tool switching requires manually transferring task state | Author promotes their solution |
-| [r/cursor: cross-tool checkpoint](https://www.reddit.com/r/cursor/comments/1rp9emv/) | Developers want repo/branch-scoped task progress | A commenter prefers fresh contexts; not everyone wants persistence |
-| [r/ClaudeCode: project memory](https://www.reddit.com/r/ClaudeCode/comments/1x8aikj/) | Persistent rules reduce repeated setup | Native memory already helps, so do not clone it |
-| [r/ClaudeAI: parallel agents and worktrees](https://www.reddit.com/r/ClaudeAI/comments/1qzduim/) | Agents overwrite each other's work without isolation | Worktrees solve directory isolation, not merge or credential conflicts |
-| [r/ClaudeCode: worktree messages](https://www.reddit.com/r/ClaudeCode/comments/1wwh2gh/) | One human manually relays progress across agents | Small, early project |
-| [r/ClaudeAI: multi-agent task ownership](https://www.reddit.com/r/ClaudeAI/comments/1uldb2g/) | Duplicate tasks and colliding edits | Also points to a simple task tracker rather than a new memory DB |
-| [r/SaasDevelopers: do people pay for context](https://www.reddit.com/r/SaasDevelopers/comments/1twrye4/) | Cross-tool context lost | Explicit counterargument: Git+Markdown solve much of it and native tools will improve |
-| [r/ClaudeAI: amnesia over many sessions](https://www.reddit.com/r/ClaudeAI/comments/1scdnmy/) | Repeated re-explanation and lost decisions | Founder promoting their own memory product |
-| [Hacker News: stop Claude forgetting](https://news.ycombinator.com/item?id=46426624) | Debate about flat docs vs asynchronous authority/coordination | Disagreement is informative; no consensus that DB is necessary |
-| [Hacker News: Agents Remember](https://news.ycombinator.com/item?id=48413877) | Git-aware freshness and evidence-aware session lifecycle | Contemporary competing idea, not validation of BrainShare revenue |
-| [Hacker News: Modulus](https://news.ycombinator.com/item?id=47292101) | Cross-repository dependencies and cross-agent memory | Existing entrant |
-| [Hacker News: Egregore](https://news.ycombinator.com/item?id=47806427) | Shared memory, human handoff, agent messaging | Existing open-source alternative |
+| [r/cursor: 2-4 minutes re-learning project context](https://www.reddit.com/r/cursor/comments/1t5l5gs/) | Claude, Codex and Cursor repeat context discovery; `CLAUDE.md` doesn't capture evolving tasks | Add project-state and scoped handoff |
+| [r/ContextEngineering: open-source cross-tool memory files](https://www.reddit.com/r/ContextEngineering/comments/1rdzwbk/) | A Git-based memory bank addresses much of the problem | Must beat plain Markdown on correctness and portability |
+| [r/ClaudeCode: session handoff grows to 150k tokens](https://www.reddit.com/r/ClaudeCode/comments/1x7j9zb/) | Handoff bloat makes resumption worse; commenters recommend separating durable state and task delta | Keep handoff bounded, link to full Slice instead of copying all content |
+| [r/claudeskills: low-overhead automatic handoff](https://www.reddit.com/r/claudeskills/comments/1x6zeja/) | Competing hook captures changes after every reply, supports restart | Don't compete only on generation frequency |
+| [r/ClaudeCode: native auto-handoff](https://www.reddit.com/r/ClaudeCode/comments/1x776ms/) | Built-in handoffs reduce basic continuity friction | Avoid selling session summary alone |
+| [r/ClaudeCode: fresh vs long sessions](https://www.reddit.com/r/ClaudeCode/comments/1wvpffv/) | Not everyone needs forced handoff; some prefer one ongoing context | Handoff should be opt-in |
+| [r/ClaudeAI: git worktree isolation](https://www.reddit.com/r/ClaudeAI/comments/1qzduim/) | Separate working copies avoid direct file overwrites | Git worktrees useful, not sufficient |
+| [r/AI_Agents: parallel coding hidden failures](https://www.reddit.com/r/AI_Agents/comments/1v53mns/) | Shared databases/ports and unrecognized agent loops remain after worktrees | Isolation and bounded retries belong to a later runner |
+| [r/ClaudeCode: test environment beyond worktrees](https://www.reddit.com/r/ClaudeCode/comments/1wyc4g4/) | QA may test the wrong API or DB despite separate worktrees | Bind evidence to actual environment, branch and SHA |
+| [r/ClaudeAI: agent ownership/approval patterns](https://www.reddit.com/r/ClaudeAI/comments/1xcvu46/) | Constrained file ownership and centralized merges matter | Avoid unconstrained auto-merging |
+| [r/AI_Agents: cross-user memory](https://www.reddit.com/r/AI_Agents/comments/1w0oknd/) | Shared recollections are not the same as branchable task/decision state | Scope/project/owner required |
+| [r/AI_Agents: memory-poisoning experiment](https://www.reddit.com/r/AI_Agents/comments/1wtbtna/) | Later false memories may overwrite approved facts | Never auto-promote untrusted claims |
+| [r/ClaudeAI: project memory as business](https://www.reddit.com/r/ClaudeAI/comments/1scdnmy/) | Developer reports lost context and a task-backed MCP workflow | Self-promotional post; treat cautiously |
+| [HN: maximizing Claude Code sessions](https://news.ycombinator.com/item?id=49300800) | Portable handoffs already popular and debated | Differentiate through independent evidence |
+| [HN: cross-harness agent memory](https://news.ycombinator.com/item?id=50182883) | Open-source entrants with normalization and human-approved skill mining already exist | Avoid redundant connectors/knowledge graph |
+| [Anthropic: native memory and `CLAUDE.md`](https://support.claude.com/en/articles/14554922-claude-code-user-faq) | First-party memory and resume features set a high baseline | Benchmark against native tooling |
+| [Anthropic: agent auto-mode safeguards](https://www.anthropic.com/research/claude-code-auto-mode) | Delegation checks, action gating and retry limits matter | No autonomous execution in the context engine |
 
-Interpretation: shared memory is a useful feature but increasingly commoditized. The hard part is **which decisions are authoritative, which work is actually done, and which context is appropriate for the current task**. A reliable handoff must also be brief and request-scoped.
+## Competitive map / integration decisions
 
-## Competitors / complements
+- [Deep Lake Hivemind](https://deeplake.ai/hivemind), [open-source code](https://github.com/activeloopai/hivemind), [architecture](https://github.com/activeloopai/hivemind/blob/main/docs/ARCHITECTURE.md): captures multiple assistant traces; workspace recall, summaries, skills, and BYOC. Integrate *read-only and opt-in* later; do not require it for BrainShare.
+- [Beads](https://github.com/steveyegge/beads): durable task state for agents. Potential external task-status input.
+- [Repomix](https://github.com/yamadashy/repomix): code-context bundling. BrainShare must preserve identity, scope, access and revisions beyond a text pack.
+- Native agent handoff / memory: default baseline; compete on independent project-level evidence and multi-person governance rather than memory persistence.
 
-- [Deep Lake Hivemind](https://deeplake.ai/hivemind): cross-agent trace capture, recall, skill extraction, workspace sharing, BYOC storage. It is broader than a transcript archive. Avoid duplicating ingestion/search before validating differentiation.
-- [Beads](https://github.com/steveyegge/beads): dependency-aware, Git-backed task state. Use as a task-source adapter, not a reason to reinvent an issue tracker.
-- [Repomix](https://github.com/yamadashy/repomix): packs repository context for models. BrainShare must be better through revision, scope, permissions and collaboration, not mere concatenation.
-- [Agent Orchestrator](https://github.com/ComposioHQ/agent-orchestrator): execution management and worktrees. Do not build this until reliable context handoffs have demonstrated demand.
-- Claude/Cursor native memory and worktrees: strong zero-extra-cost alternatives. A standalone paid subscription needs an outcome they cannot easily provide.
+## What is implemented in Verified Handoff v1
 
-## Feature tiers
+- Creates JSON handoff from a compiled Slice plus Git SHA, branch, dirty status, task title, blockers, next steps and explicitly unverified claims.
+- Bounded fields, validated Slice IDs, local-only storage, symlink guards, file permissions, default Git ignore file.
+- CLI `handoff create` / `handoff check`; read-only MCP `get_handoff`.
+- Handoff changes from `current` to `stale` on Slice revision or Git HEAD changes. `limited` means untracked/dirty Git context.
+- **Does not verify CI results**, ingest transcripts, run agent-authored commands, upload organizational memories, guarantee secrecy or operate autonomous agents.
 
-**Now (implemented in v1):**
-- Manually authored scoped handoff based on an existing compiled Slice.
-- Git SHA and working-tree state, never a proof of tests/merge/deployment.
-- Unverified agent claims, explicit next steps and blockers.
-- Latest handoff via local CLI and read-only MCP.
-- Freshness check against current Git HEAD and Slice revision.
+## Trust hierarchy for future versions
 
-**Next only after test evidence:**
-- Verified CI run bound to exact SHA and repository identity.
-- Task-state adapters (GitHub Issues, Beads), with explicit reviewed status.
-- Human approval / superseded decisions.
-- Redaction and publish-safety inspector.
-- Opt-in Hivemind session summary import, with provenance and workspace authorizations.
+1. **Claim:** raw statement from human, session, issue, model, or memory store; default is unverified.
+2. **Observed code state:** repository, branch, commit, and working-tree fingerprint; shows what code was present, not whether correct.
+3. **Independent evidence:** authenticated CI run bound to specific commit and job environment; still scope-limited.
+4. **Approval:** human or explicit policy approval for production/security decisions.
+5. **Supersession:** keep history and reasons when facts change; never silently overwrite a verified decision because a newer memory says otherwise.
 
-**Not yet:**
-- Universal session-transcript ingestion, vector database, custom code graph.
-- Arbitrary agent command execution or claims of "never stopping".
-- Automatic promotion of extracted skills into org-wide rules.
-- Hosted billing, inter-tenant collaboration, or long-running sandbox infrastructure.
+A CI result only attests that the relevant job ran and reported its outcome. It does not prove deployment, security, or production correctness. Store exact repository identity, commit, workflow, run ID, timestamps, actor and result when building CI integration.
 
-## Safety and reliability acceptance criteria
+## Market-entry roadmap
 
-1. Claims stay **unverified**, even when phrased as completed work.
-2. Branch/commit changes and Slice content changes mark older handoffs stale.
-3. No Git repository must not be represented as independently verified.
-4. Symlinked handoffs and IDs with traversal characters cannot be used for arbitrary reads.
-5. Generation does not run shell commands from prompts, contact Hivemind, or capture full agent traces.
-6. Local files must not be auto-published; users review the data before sharing.
-7. Git state records identity/freshness only. Future CI verification must independently authenticate run ID, tested SHA, outcome and timing.
-8. Autonomy, if introduced, will use bounded, isolated execution with explicit stop and approval controls.
+### P0 — foundation and instrumented workflow
+- Consolidate foundation PR with AGPL license and tests; keep existing Obsidian publisher working.
+- Ship CLI and MCP handoffs and a sample project.
+- Add privacy and publication preview before sharing handoff contents.
+- Measure setup completion and whether people can independently resume an interrupted task.
 
-## Validation plan: real-world pilot
+### P1 — verifiable handoff
+- GitHub Actions adapter to attest tests for an exact SHA.
+- Human approval for key project decisions and statuses.
+- Cross-platform handoff views and token-efficient task delta.
+- Optional adapters for GitHub Issues/Beads and Hivemind (with consent and permissions).
 
-Run at least **12 task handoffs** across two independent developers/agents, randomized among:
+### P2 — monetization only if P1 works
+- Self-hosted AGPL remains free.
+- Personal BYOC: managed setup and upgrades, no central raw session capture requirement.
+- Teams: reviews, role-based access, project governance, audit and opt-in hosted infrastructure.
+- Avoid pricing claims without interviews, paid pilot and actual cost measurements.
 
-- baseline: repo + built-in agent memory, ordinary notes;
-- Hivemind shared memory;
-- BrainShare Verified Handoff with the same permitted sources.
+### Not now
+- Another vector memory store; unlimited automatic transcript collection; autonomous shell executor; browser-based IDE; enterprise federation; blanket lifetime promises.
 
-Track time to first correct change, replayed/rejected solutions, reviewer corrections, verified task completion, hallucinated "done" claims, prompt/context overhead and cost. Freeze branch and CI provenance for fairness. Do not ship team billing based on self-reported productivity alone.
+## Evaluation and kill criteria
 
-**Success hypothesis:** for otherwise comparable tasks, the verified-handoff condition measurably reduces re-explanation and false completion claims without significantly increasing setup or context overhead. If it doesn't, keep the handoff as an open-source utility and avoid a separate paid tier.
+Pilot across at least **12 non-sensitive engineering handoffs** with multiple developers and at least two different agents. Compare:
+1. Native assistant memory and existing docs (baseline);
+2. Hivemind-assisted shared memory;
+3. Verified BrainShare handoff with equivalent authorized inputs.
 
-## Positioning and distribution
+Predefine task completion criteria. Rotate order, freeze reference commits where practical, and have an independent reviewer mark correctness. Measure:
+- time to first correct code change and verified task completion;
+- false completion claims, repeated work, missed constraints;
+- onboarding time and extra context tokens;
+- cost per accepted change, and any unauthorized cross-project retrieval.
 
-Suggested line: **"BrainShare — project context that survives people, sessions, and agents."**
+Never use the user's production secrets or customer data for the pilot. If BrainShare does not improve correctness, resumption or time without high setup overhead, keep this feature free and revise the product thesis before building billing.
 
-First audiences: freelancers handing work to clients, small engineering teams onboarding replacement developers, and developers switching coding agents. Sell managed deployment and governed team workflows, not a promise that AGPL-licensed handoff JSON or memory storage is proprietary.
+## Specific edge cases
 
-A future commercial page should show one realistic end-to-end demo: agent A modifies repo, CI shows a failed check, BrainShare records that it is blocked, agent B resumes correctly and makes the missing change. Track activation and paid intent before adding advanced infrastructure.
+- Old Git SHA / changed Slice: stale; do not assert completion.
+- Dirty worktree / no Git: limited; warn about state.
+- Duplicate handoff events: unique IDs and immutability; future idempotency keys.
+- Agent prompt injection in notes: parsed as data, never executed or converted to policy.
+- Bad memories: cannot overwrite approved statements without evidence and approval.
+- Workspace/tenant leakage: authorization at query and storage boundary, not just prompt instructions.
+- Symlinks and path traversal: deny arbitrary reads; do not expose raw filesystem paths in public APIs.
+- Offboarding: revoke access to all future reads; identify copies already downloaded separately.
+- Data deletion: specify cleanup for raw records, derivatives, caches and backups.
+- Parallel runtime changes: worktrees alone don't isolate databases, ports or queues.
+- Repeated attempts: bounded retries and explicit human escalation.
+- Lost agent/CI network: fail closed on verification; preserve the handoff as unverified.
+- Third-party provider outage and billing caps: don't block the core local experience.
+- AGPL: existing MIT release rights survive; project-owned code now AGPL-3.0-only; third-party dependencies keep their licenses.
