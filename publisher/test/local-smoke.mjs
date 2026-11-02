@@ -130,7 +130,9 @@ async function main() {
     check(html.includes("[not shared]"), true, "Excluded link target redacted");
     const search = await request("/share/public/api/search?q=" + encodeURIComponent(CANARY));
     check(search.status, 200, "Public search serves scoped request");
-    check((await search.text()).includes(CANARY), false, "Excluded canary absent from search");
+    const searchData = await search.json();
+    check(Array.isArray(searchData.matches), true, "Search returns a match collection");
+    check(searchData.matches.length, 0, "Excluded notes do not appear as search hits");
     for (const pathname of ["/share/public", "/share/public/feed.xml", "/share/public/download"]) {
       const resp = await request(pathname);
       check(resp.status, 200, "Public route accessible: " + pathname);
