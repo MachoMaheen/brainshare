@@ -8,7 +8,7 @@ BrainShare is the open context layer for Markdown. The canonical product primiti
 2. A Slice is more than a folder: it carries membership, relationships, entrypoint, visibility, revision and future provenance.
 3. Author-side compilation does expensive work once; the Cloudflare read path stays edge-first.
 4. The current Worker + `caches.default` + KV data plane remains the serving foundation.
-5. D1, if introduced for managed Cloud accounts/billing/teams, is a control-plane store and does not replace KV on the hot published-content path.
+5. Relational storage, if added, belongs outside the KV-backed published-content hot read path unless an explicit design review establishes otherwise.
 6. Human and machine views resolve to the same logical Slice revision.
 7. The protocol stays editor-neutral. Obsidian, VS Code, Viewer and CLI are adapters.
 8. Gated authorization happens before shared Cache API lookup. Browser `?t=` credentials are exchanged for a scoped HttpOnly session cookie before rendered HTML enters `caches.default`, so shared cached representations never contain one recipient's JWT.
@@ -26,7 +26,7 @@ BrainShare is the open context layer for Markdown. The canonical product primiti
 
 ## Viewer MVP
 
-The Viewer is an acquisition and workflow surface, not the core moat. It opens a folder, watches Markdown changes, highlights recent agent-generated artifacts, renders files locally, follows wikilinks and relative Markdown links, and can curate selected files into a Live Slice manifest. The local HTTP bridge is bound to `127.0.0.1` and refuses non-Markdown project file reads.
+The Viewer is a local read-first interface for Markdown context. It opens a folder, watches Markdown changes, highlights recent agent-generated artifacts, renders files locally, follows wikilinks and relative Markdown links, and can curate selected files into a Live Slice manifest. The local HTTP bridge is bound to `127.0.0.1` and refuses non-Markdown project file reads.
 
 ## Live and Snapshot Slices
 
