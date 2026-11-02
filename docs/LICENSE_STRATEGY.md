@@ -1,19 +1,11 @@
-# BrainShare license strategy
+# BrainShare licensing
 
-## Current license (effective with PR #7)
+Project-owned BrainShare source in this repository is licensed under **GNU AGPL-3.0-only**.
 
-BrainShare's project-owned source is licensed under **GNU AGPL-3.0-only**. See [../LICENSE](../LICENSE), [../NOTICE.md](../NOTICE.md), and [../CONTRIBUTING.md](../CONTRIBUTING.md).
+- [License text](../LICENSE)
+- [Copyright and prior-release notices](../NOTICE.md)
+- [Contribution guidelines](../CONTRIBUTING.md)
 
-Earlier releases were distributed under MIT and existing recipients retain their MIT permissions for those copies. A new license does not revoke historical permissions.
+Earlier BrainShare versions distributed under MIT retain their original permissions for those versions. Dependencies and third-party components retain their respective licenses.
 
-The protocol, SDK, CLI, Viewer, VS Code adapter, Obsidian plugin, and Cloudflare publisher in this repository follow AGPL-3.0-only unless a particular copyright holder grants a separate license to specific code. Do **not** infer that protocol/SDK code is MIT licensed from an older proposal. Dependency licenses remain separate.
-
-## Commercialization
-
-Offer paid services for deployment, onboarding, managed BYOC control plane, organization administration, support, and separately developed services where legally appropriate. AGPL covered code remains redistributable; paid entitlement checks should not be treated as proprietary restrictions on AGPL-covered software.
-
-An optional future permissive **standalone protocol specification/SDK** may support adoption, but first requires rights and license-compatibility review. Likewise a commercial dual-license for the same code requires copyright permissions from contributors. No commercial relicensing permission is implied by ordinary AGPL contributions.
-
-Modified network-facing deployments must follow AGPLv3 section 13; the source link must point to the actual corresponding modified source. Branding and trademark policies are separate from the software copyright license.
-
-This document is product guidance, not legal advice.
+For modified network-facing deployments, review AGPLv3 section 13 and provide the corresponding source of the deployed modification. This document is informational; the license text controls.
