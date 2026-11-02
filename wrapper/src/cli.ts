@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 #!/usr/bin/env node
 import yargs, { Argv } from "yargs";
 import { hideBin } from "yargs/helpers";
