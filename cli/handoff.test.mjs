@@ -27,6 +27,7 @@ test("creates a private, local handoff without claiming agent assertions are ver
   assert.equal(stored.file, file);
   assert.equal(stored.handoff.id, handoff.id);
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+  assert.equal(await fs.readFile(path.join(root, ".brainshare", "handoffs", ".gitignore"), "utf8"), "*\n!.gitignore\n");
   const inspected = await checkHandoff(root, handoff, slice());
   assert.equal(inspected.freshness, "limited");
   assert.equal(inspected.claimsVerified, false);
