@@ -4,7 +4,7 @@
   "description": "Publish connected Markdown slices with working links, backlinks, graph context, access control, and stable URLs.",
   "version": "0.1.0",
   "publisher": "MachoMaheen",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "engines": {
     "vscode": "^1.95.0"
   },
