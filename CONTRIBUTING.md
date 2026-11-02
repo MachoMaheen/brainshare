@@ -8,6 +8,6 @@ Project-owned code in BrainShare is licensed under **AGPL-3.0-only** (see [LICEN
 
 Do not copy code from another project unless its license and notices permit inclusion in this AGPL project. Preserve applicable third-party attribution and license notices, and describe notable new dependencies in your pull request.
 
-**No broad commercial relicensing permission or contributor license agreement is assumed.** If BrainShare later offers parts of the project under a separate commercial license, permission from the relevant copyright holders may be needed. A separate signed agreement would be requested if appropriate; ordinary contributions do not automatically grant that permission.
+Contributors retain their copyrights and license their submissions under AGPL-3.0-only unless they explicitly agree otherwise.
 
 For changes to the Cloudflare Worker that are made available over a network, review AGPLv3 section 13 and keep the source-code link accurate for the deployed version.
