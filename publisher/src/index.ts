@@ -453,7 +453,7 @@ export default {
     }
 
     // GET /share/:wrapId/asset/:key — membership and access checked before reading.
-    const scopedAssetMatch = path.match(/^\\/share\\/([a-zA-Z0-9_-]{1,64})\\/asset\\/([a-f0-9]{16,128})$/i);
+    const scopedAssetMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})\/asset\/([a-f0-9]{16,128})$/i);
     if (scopedAssetMatch && req.method === "GET") {
       const [, wrapId, rawKey] = scopedAssetMatch;
       const key = rawKey.toLowerCase();
@@ -1054,7 +1054,7 @@ ${entries}
     }
 
     // Standalone canvases are intentionally not exposed. Use /share/:id/c/:ulid.
-    const standaloneCanvasMatch = path.match(/^\\/c\\/([0-9A-HJKMNP-TV-Z]{26})$/);
+    const standaloneCanvasMatch = path.match(/^\/c\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (standaloneCanvasMatch && req.method === "GET")
       return html("<h1>404</h1><p>canvas not found</p>", 404);
 
