@@ -33,11 +33,11 @@ node cli/brainshare.mjs handoff check architecture
 
 Create and check accept a Slice ID from `.brainshare/slices.json`. Repeat `--next`, `--blocker`, or `--claim` for multiple entries. `--status` accepts `in_progress`, `blocked`, or `ready_for_review` (not `completed`, because completion must be independently established).
 
-The local file is written to `.brainshare/handoffs/<slice>-<time>-<id>.json` with restrictive file permissions where supported. It contains task text supplied by the author, selected Slice metadata and revision, Git SHA/branch/dirty state, and a **permanently unverified** marker for claims. It does not ingest Claude/Cursor transcripts, execute model-supplied commands, or assert tests passed. Review its contents before sharing or committing it.
+The local file is written to `.brainshare/handoffs/<slice>-<time>-<id>.json` with restrictive file permissions where supported. It contains task text supplied by the author, selected Slice metadata and revision, Git SHA/branch/dirty state, and a **permanently unverified** marker for claims. It does not ingest third-party session transcripts, execute model-supplied commands, or assert tests passed. Review its contents before sharing or committing it.
 
 The `check` command compares the latest stored handoff against the current Slice revision and Git HEAD. It returns `current`, `limited`, or `stale`. **Current means fingerprints match, not that an agent's claims are true**. When stale it exits with status 2. Non-Git projects remain usable but produce a limited result.
 
-The local BrainShare MCP server now exposes a read-only `get_handoff` tool for a specified Slice, returning the same handoff and freshness result. It does not automatically distribute handoffs to organization members or to Hivemind.
+The local BrainShare MCP server now exposes a read-only `get_handoff` tool for a specified Slice, returning the same handoff and freshness result. It does not automatically distribute handoffs to third parties.
 
 ### Security boundaries
 
