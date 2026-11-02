@@ -88,7 +88,8 @@ describe("renderNote", () => {
     );
     expect(html).toContain(">Other Note</a>");
     expect(html).toContain('class="wikilink-private"');
-    expect(html).toContain(">Missing</span>");
+    expect(html).toContain(">[not shared]</span>");
+    expect(html).not.toContain(">Missing</span>");
   });
 
   it("threads tokenQuery through internal wikilink hrefs", () => {
@@ -121,7 +122,10 @@ describe("renderNote", () => {
 
   it("respects wikilink alias [[Target|Alias]]", () => {
     const md = "---\ntitle: A\n---\n\n[[Target|displayed text]]\n";
-    const html = renderNote(md, "01HX0000000000000000000007");
+    const html = renderNote(md, "01HX0000000000000000000007", {
+      shareBase: "https://x.example/share/example",
+      shareSet: new Map([["Target", "01HX0000000000000000000099"]]),
+    });
     expect(html).toContain("displayed text");
     expect(html).not.toContain(">Target<");
   });
