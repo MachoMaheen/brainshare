@@ -33,6 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from publication_preflight import scan_vault
 
 ENC = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp"}
@@ -98,6 +99,17 @@ def main() -> int:
         print(f"vault not a directory: {vault}", file=sys.stderr)
         return 2
 
+    # Evaluate the complete vault before any file mutation or network call.
+    report = scan_vault(vault)
+    if not report["ok"]:
+        print(f"Publication blocked: {len(report['errors'])} preflight finding(s).", file=sys.stderr)
+        for finding in report["errors"]:
+            print(f"  {finding['path']}:{finding['line'] or '-'} {finding['code']}", file=sys.stderr)
+        return 2
+    approved = {entry["path"]: entry["sha256"] for entry in report["entries"]}
+    print(f"Preflight passed: {len(approved)} files, {report['asset_count']} safe assets. "
+          "Only reviewed Markdown and raster images will be uploaded.", flush=True)
+
     note_ulids: list[str] = []
     canvas_ulids: list[str] = []
     assets: dict[str, str] = {}
@@ -110,6 +122,11 @@ def main() -> int:
             continue
         rel = str(f.relative_to(vault))
         ext = f.suffix.lower()
+        if ext not in (".md", ".canvas", *IMG_EXTS):
+            continue
+        if f.is_symlink() or rel not in approved or hashlib.sha256(f.read_bytes()).hexdigest() != approved[rel]:
+            print(f"ABORT: file changed since preflight: {rel}", file=sys.stderr)
+            return 2
 
         # Markdown notes — stamp + publish, but skip files that are body-empty
         # (frontmatter only, or zero bytes). Publishing them creates ULID-only

@@ -15,8 +15,11 @@ const project = path.resolve(dir, "..");
 const ULID_PUBLIC = "01HX0000000000000000000001";
 const ULID_GATED = "01HX0000000000000000000002";
 const ULID_EXCLUDED = "01HX0000000000000000000003";
-const KEY_PUBLIC = "a".repeat(64);
-const KEY_GATED = "b".repeat(64);
+import { createHash } from "node:crypto";
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==","base64");
+const GIF = Buffer.from("R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=","base64");
+const KEY_PUBLIC = createHash("sha256").update(PNG).digest("hex");
+const KEY_GATED = createHash("sha256").update(GIF).digest("hex");
 const CANARY = "EXCLUDED_ONLY_SYNTHETIC_CANARY_7851";
 const OWNER = "synthetic-smoke-publisher-token";
 const auth = { authorization: "Bearer " + OWNER };
@@ -96,10 +99,14 @@ async function main() {
       const resp = await putText("/api/notes/" + id, text, { "x-note-path": filename });
       check(resp.status, 200, "Owner can upload fixture " + filename);
     }
-    for (const key of [KEY_PUBLIC, KEY_GATED]) {
-      const resp = await putText("/api/assets/" + key, "synthetic-asset", { "content-type": "image/png" });
-      check(resp.status, 200, "Owner can upload asset fixture");
-    }
+    const assetPut = await request("/api/assets/" + KEY_PUBLIC, {
+      method: "PUT", headers: { ...auth, "content-type": "image/png" }, body: PNG
+    });
+    check(assetPut.status, 200, "Owner uploads a hash-verified synthetic PNG");
+    const gatedPut = await request("/api/assets/" + KEY_GATED, {
+      method: "PUT", headers: { ...auth, "content-type": "image/gif" }, body: GIF
+    });
+    check(gatedPut.status, 200, "Owner uploads a hash-verified synthetic GIF");
 
     const publicWrap = await putJson("/api/wrappers/public", {
       title: "Public", ulids: [ULID_PUBLIC], gated: false,

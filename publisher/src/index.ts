@@ -18,6 +18,7 @@ import {
 } from "./render";
 import { signJWT, verifyJWT, TokenClaims } from "./jwt";
 import { zipSync } from "fflate";
+import { MAX_ASSET_BYTES, sniffSafeImage, safeStoredImageMime, digestSha256Hex, hasEmbeddedImageMetadata } from "./asset-security";
 
 interface Env {
   NOTES: KVNamespace;
@@ -435,10 +436,19 @@ export default {
       if (req.method === "PUT") {
         if (unauthorized(env, req)) return forbidden();
         if (!(await rateLimitOk(env, req, "asset-put", 60, 60))) return rateLimited(60);
-        const ct = req.headers.get("content-type") ?? "application/octet-stream";
+        if (!/^[a-f0-9]{64}$/.test(key)) return new Response("asset key must be SHA-256", { status: 400 });
+        const declared = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+        if (req.headers.get("content-length") && Number(req.headers.get("content-length")) > MAX_ASSET_BYTES)
+          return new Response("asset too large (>5MB)", { status: 413 });
         const buf = await req.arrayBuffer();
-        if (buf.byteLength > 5_000_000) return new Response("asset too large (>5MB)", { status: 413 });
-        await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: ct } });
+        if (buf.byteLength > MAX_ASSET_BYTES) return new Response("asset too large (>5MB)", { status: 413 });
+        const detected = sniffSafeImage(new Uint8Array(buf));
+        if (!detected) return new Response("unsupported or unsafe image data", { status: 415 });
+        if (hasEmbeddedImageMetadata(new Uint8Array(buf)))
+          return new Response("image metadata must be stripped before upload", { status: 415 });
+        if (declared !== detected) return new Response("image MIME does not match content", { status: 415 });
+        if (await digestSha256Hex(buf) !== key) return new Response("asset SHA-256 mismatch", { status: 400 });
+        await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: detected } });
         return json({ key, url: `${origin}/asset/${key}` });
       }
       if (req.method === "GET") {
@@ -466,12 +476,18 @@ export default {
       if (!gate.ok) return gate.resp;
       const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
       if (!value) return new Response("not found", { status: 404 });
-      const ct = (metadata as { contentType?: string } | null)?.contentType ?? "application/octet-stream";
+      // Legacy assets may have untrusted MIME metadata. Refuse unsupported
+      // stored formats even when referenced by a historical wrapper.
+      const ct = safeStoredImageMime(metadata);
+      if (!ct || sniffSafeImage(new Uint8Array(value)) !== ct || hasEmbeddedImageMetadata(new Uint8Array(value)))
+        return new Response("unsupported asset", { status: 415, headers: { "cache-control": "no-store" } });
       return new Response(value, { headers: {
         "content-type": ct,
         "cache-control": wrap.gated ? "private, no-store" : "public, max-age=300",
         "x-content-type-options": "nosniff",
         "content-security-policy": "sandbox; default-src 'none'",
+        "cross-origin-resource-policy": "same-origin",
+        "referrer-policy": "no-referrer",
       } });
     }
 
