@@ -7713,6 +7713,54 @@ function zipSync(data, opts) {
 }
 __name(zipSync, "zipSync");
 
+// src/asset-security.ts
+var MAX_ASSET_BYTES = 5e6;
+var SAFE_IMAGE_MIMES = /* @__PURE__ */ new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp"
+]);
+function sniffSafeImage(bytes) {
+  if (bytes.length < 12)
+    return null;
+  const ascii = /* @__PURE__ */ __name((offset, length) => String.fromCharCode(...bytes.subarray(offset, offset + length)), "ascii");
+  if (bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b))
+    return "image/png";
+  if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
+    return "image/jpeg";
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")
+    return "image/gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP")
+    return "image/webp";
+  if (ascii(4, 4) === "ftyp" && (ascii(8, 4) === "avif" || ascii(8, 4) === "avis"))
+    return "image/avif";
+  if (bytes[0] === 66 && bytes[1] === 77)
+    return "image/bmp";
+  return null;
+}
+__name(sniffSafeImage, "sniffSafeImage");
+function hasEmbeddedImageMetadata(bytes) {
+  const markers = ["Exif", "exif", "eXIf", "tEXt", "iTXt", "zTXt", "XMP", "xmp", "http://ns.adobe.com/xap"];
+  const text = new TextDecoder("latin1").decode(bytes);
+  return markers.some((marker) => text.includes(marker));
+}
+__name(hasEmbeddedImageMetadata, "hasEmbeddedImageMetadata");
+function safeStoredImageMime(metadata) {
+  if (!metadata || typeof metadata !== "object")
+    return null;
+  const value = metadata.contentType;
+  return typeof value === "string" && SAFE_IMAGE_MIMES.has(value) ? value : null;
+}
+__name(safeStoredImageMime, "safeStoredImageMime");
+async function digestSha256Hex(bytes) {
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+__name(digestSha256Hex, "digestSha256Hex");
+
 // src/index.ts
 var ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 function unauthorized(env, req) {
@@ -8060,11 +8108,24 @@ var src_default = {
           return forbidden();
         if (!await rateLimitOk(env, req, "asset-put", 60, 60))
           return rateLimited(60);
-        const ct = req.headers.get("content-type") ?? "application/octet-stream";
-        const buf = await req.arrayBuffer();
-        if (buf.byteLength > 5e6)
+        if (!/^[a-f0-9]{64}$/.test(key))
+          return new Response("asset key must be SHA-256", { status: 400 });
+        const declared = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+        if (req.headers.get("content-length") && Number(req.headers.get("content-length")) > MAX_ASSET_BYTES)
           return new Response("asset too large (>5MB)", { status: 413 });
-        await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: ct } });
+        const buf = await req.arrayBuffer();
+        if (buf.byteLength > MAX_ASSET_BYTES)
+          return new Response("asset too large (>5MB)", { status: 413 });
+        const detected = sniffSafeImage(new Uint8Array(buf));
+        if (!detected)
+          return new Response("unsupported or unsafe image data", { status: 415 });
+        if (hasEmbeddedImageMetadata(new Uint8Array(buf)))
+          return new Response("image metadata must be stripped before upload", { status: 415 });
+        if (declared !== detected)
+          return new Response("image MIME does not match content", { status: 415 });
+        if (await digestSha256Hex(buf) !== key)
+          return new Response("asset SHA-256 mismatch", { status: 400 });
+        await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: detected } });
         return json({ key, url: `${origin}/asset/${key}` });
       }
       if (req.method === "GET") {
@@ -8092,12 +8153,16 @@ var src_default = {
       const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
       if (!value)
         return new Response("not found", { status: 404 });
-      const ct = metadata?.contentType ?? "application/octet-stream";
+      const ct = safeStoredImageMime(metadata);
+      if (!ct || sniffSafeImage(new Uint8Array(value)) !== ct || hasEmbeddedImageMetadata(new Uint8Array(value)))
+        return new Response("unsupported asset", { status: 415, headers: { "cache-control": "no-store" } });
       return new Response(value, { headers: {
         "content-type": ct,
         "cache-control": wrap.gated ? "private, no-store" : "public, max-age=300",
         "x-content-type-options": "nosniff",
-        "content-security-policy": "sandbox; default-src 'none'"
+        "content-security-policy": "sandbox; default-src 'none'",
+        "cross-origin-resource-policy": "same-origin",
+        "referrer-policy": "no-referrer"
       } });
     }
     if (path === "/api/export") {
