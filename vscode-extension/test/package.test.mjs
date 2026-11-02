@@ -38,7 +38,7 @@ test("bundled extension preserves universal manifest and stable identity", async
     },
     window:{
       activeTextEditor:null,registerTreeDataProvider:()=>({dispose(){}}),showErrorMessage:async(m)=>{errors.push(m);},
-      showInformationMessage:async()=>{},showWarningMessage:async()=>"Unpublish",showInputBox:async()=>undefined,
+      showInformationMessage:async()=>{},showWarningMessage:async(message)=>message.includes("Publish this Markdown")?"Publish":"Unpublish",showInputBox:async()=>undefined,
       showQuickPick:async()=>undefined,showOpenDialog:async()=>undefined,withProgress:async(_o,fn)=>fn({report(){}}),
     },
     commands:{registerCommand:(name,fn)=>{commands.set(name,fn);return{dispose(){}};}},
