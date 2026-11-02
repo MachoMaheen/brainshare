@@ -11,7 +11,7 @@ The Worker independently hashes the uploaded content and requires the URL key to
 - Existing SVG embeds and files with mismatched or non-SHA-256 asset keys will stop rendering. Convert trusted illustrations to raster formats, re-upload and republish the Slice manifest.
 - Existing direct `/asset/<key>` links remain unavailable; scoped `/share/<id>/asset/<key>` links require membership and authorization.
 - The legacy bulk publisher explicitly publishes the **whole vault** (except ignored directories); it cannot represent a restricted Slice. Use the CLI's reviewed Slice selection when you want document-level exclusions. Never point bulk publish at a directory containing private information.
-- The scanner does **not** fully parse EXIF or metadata embedded in raster formats, does not inspect steganography, and cannot guarantee content is free from confidential information. Manually strip image metadata and review assets before publication.
+- The scanner rejects common EXIF, XMP, and PNG textual metadata markers but does **not** fully parse every metadata container, inspect steganography, or guarantee that images are free from confidential information. Manually strip image metadata and review assets before publication.
 - The bulk script previously performed stamp-and-upload in a single pass. The preflight gate stops unsafe scans before uploads, but source files can still change concurrently or a later network operation can fail after an earlier upload. No transactional multi-file publishing is claimed.
 
 Run the offline regressions with:
