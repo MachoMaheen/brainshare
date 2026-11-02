@@ -128,9 +128,12 @@ brainshare init
 brainshare slice create architecture --include "README.md,docs/**/*.md"
 brainshare inspect architecture
 brainshare snapshot architecture
-brainshare publish architecture
+brainshare preflight architecture
+brainshare publish architecture --confirm-publication --revision REVISION_FROM_PREFLIGHT
 brainshare view .
 ```
+
+**Important:** Review all selected files with `brainshare preflight` before publishing. An explicit confirmation is required, and the optional `--revision` pin prevents publishing a different Slice revision from the one reviewed. Never commit publisher credentials.
 
 Publishing accepts:
 
