@@ -4,6 +4,7 @@ import path from "node:path";
 import { loadProject, compileProjectSlice } from "../cli/lib.mjs";
 import { buildKnowledgeGraph } from "@brainshare/core";
 import { parseMarkdown } from "@brainshare/markdown";
+import { latestHandoff, checkHandoff } from "../cli/handoff.mjs";
 
 const root=path.resolve(process.env.BRAINSHARE_ROOT||process.argv[2]||process.cwd());
 const protocolVersion="2025-06-18";
@@ -12,6 +13,7 @@ const tools=[
   {name:"get_slice",description:"Get a compiled BrainShare Slice revision, membership, graph and backlinks.",inputSchema:{type:"object",properties:{id:{type:"string"}},required:["id"],additionalProperties:false}},
   {name:"get_note",description:"Read a Markdown note by project-relative path.",inputSchema:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}},
   {name:"search_notes",description:"Search Markdown titles and bodies. Optionally restrict to one Slice.",inputSchema:{type:"object",properties:{query:{type:"string"},slice:{type:"string"},limit:{type:"number"}},required:["query"],additionalProperties:false}},
+  {name:"get_handoff",description:"Get the latest locally generated handoff for a Slice, with Git and content freshness checks. Claims are never independently verified by this tool.",inputSchema:{type:"object",properties:{id:{type:"string"}},required:["id"],additionalProperties:false}},
   {name:"get_context",description:"Get local outgoing links and backlinks for a Markdown path.",inputSchema:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}}
 ];
 const text=(value)=>({content:[{type:"text",text:typeof value==="string"?value:JSON.stringify(value,null,2)}]});
@@ -28,6 +30,11 @@ async function callTool(name,args={}){
     const q=String(args.query||"").trim().toLowerCase();if(!q)throw new Error("query is required");let allowed=new Set(Object.keys(project.files));if(args.slice){const s=(await compileProjectSlice(root,args.slice)).slice;allowed=new Set(s.files.map(f=>f.path));}
     const limit=Math.max(1,Math.min(50,Number(args.limit)||10)),matches=[];
     for(const rel of allowed){const md=project.files[rel],doc=parseMarkdown(md,path.basename(rel,".md")),hay=`${doc.title}\n${doc.body}`.toLowerCase(),idx=hay.indexOf(q);if(idx<0)continue;const body=doc.body.replace(/\s+/g," "),bodyIdx=body.toLowerCase().indexOf(q);matches.push({path:rel,id:project.manifest.notes[rel]?.id,title:doc.title,snippet:bodyIdx>=0?body.slice(Math.max(0,bodyIdx-80),bodyIdx+q.length+120):body.slice(0,200)});if(matches.length>=limit)break;}return text(matches);
+  }
+  if(name==="get_handoff"){
+    const {handoff}=await latestHandoff(root,args.id);
+    const {slice}=await compileProjectSlice(root,args.id);
+    return text({handoff,freshness:await checkHandoff(root,handoff,slice)});
   }
   if(name==="get_context"){
     const rel=String(args.path||"").replace(/\\/g,"/");if(!project.files[rel])throw new Error(`Unknown Markdown path: ${rel}`);const graph=buildKnowledgeGraph(project.files),titles=Object.fromEntries(graph.nodes.map(n=>[n.path,n.title]));return text({path:rel,outgoing:(graph.outgoing[rel]??[]).map(p=>({path:p,title:titles[p]})),backlinks:(graph.backlinks[rel]??[]).map(p=>({path:p,title:titles[p]}))});
