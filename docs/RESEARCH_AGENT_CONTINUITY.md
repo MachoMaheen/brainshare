@@ -112,3 +112,39 @@ Never use the user's production secrets or customer data for the pilot. If Brain
 - Lost agent/CI network: fail closed on verification; preserve the handoff as unverified.
 - Third-party provider outage and billing caps: don't block the core local experience.
 - AGPL: existing MIT release rights survive; project-owned code now AGPL-3.0-only; third-party dependencies keep their licenses.
+
+## November 2 follow-up: additional forum and competitor validation
+
+These are individual self-selected reports, not population-level demand. Posts created to promote a competing product are directional evidence only.
+
+| Public report | Specific failure mode | Product implication |
+| --- | --- | --- |
+| [r/ClaudeCode: 150k-token handoffs](https://www.reddit.com/r/ClaudeCode/comments/1x7j9zb/) | Full-history handoffs consume the next session's available context | Bound task-state records; reference source material rather than duplicate it |
+| [r/claudeskills: stop-hook automatic handoff](https://www.reddit.com/r/claudeskills/comments/1x6zeja/) | A competing project reconstructs handoffs automatically without extra model calls | Automation alone is not a defensible paid feature |
+| [r/cursor: Cursor-to-Claude handoff](https://www.reddit.com/r/cursor/comments/1v93dmi/) | Dirty Git tree, missing decisions, stale chat summaries | Capture branch/commit/dirty status; warn if current state differs |
+| [r/cursor: dirty-worktree handoffs](https://www.reddit.com/r/cursor/comments/1v8d9ha/) | Next agent must distinguish durable docs, current code state and chat | Keep separate claim, Git, evidence and approval layers |
+| [r/cursor: handoff relay tool](https://www.reddit.com/r/cursor/comments/1stt6i0/) | Custom relay packages project, latest commit and next steps | Basic multi-tool relay has competition; validate evidence differentiation |
+| [r/ClaudeCode: CI/worktree test environment](https://www.reddit.com/r/ClaudeCode/comments/1wyc4g4/) | Worktrees do not isolate service instances, databases or queues | CI evidence must name the actual tested SHA; runtime isolation is a separate product |
+| [r/ClaudeCode: worktrees and serialized merging](https://www.reddit.com/r/ClaudeCode/comments/1uvysm6/) | Worktrees help avoid file interference; merge/testing still require coordination | Do not claim worktree equals safe autonomous execution |
+| [r/ExperiencedDevs: comprehension trap](https://www.reddit.com/r/ExperiencedDevs/comments/1ux5lcn/) | Agent-created code can reduce developer architectural understanding | Preserve the why and evidence, not only agent-generated prose |
+| [r/LocalLLaMA: memory vs retrieval quality](https://www.reddit.com/r/LocalLLaMA/comments/1r21ojm/) | Fuzzy retrieval and unfiltered chat dumps can worsen correctness | Keep provenance, exact identifiers and scoped retrieval |
+| [r/LocalLLaMA: measuring memory benchmarks](https://www.reddit.com/r/LocalLLaMA/comments/1u21vgq/) | Task success alone cannot prove memory helped | Compare agents with and without controlled, equivalent inputs |
+| [r/ClaudeCode: token-baseline overload](https://www.reddit.com/r/ClaudeCode/comments/1xghkdy/) | Baseline tools/skills/memory can consume large context | Keep handoff short and on-demand, not auto-injected wholesale |
+| [r/LocalLLaMA: babysitting agents](https://www.reddit.com/r/LocalLLaMA/comments/1u6mmuu/) | Unattended coding loops may change inappropriate code | Separate evidence and task approval from execution |
+| [Hacker News: coding-agent memory discussions](https://news.ycombinator.com/item?id=50182883) | Multi-harness memory adapters already exist | Don't recreate Hivemind |
+
+**Primary sources:**
+- [Deep Lake Hivemind README](https://github.com/activeloopai/hivemind/blob/main/README.md): cross-agent traces, summaries, skillify, code graphs, team rules, BYOC; not a full task-verification framework.
+- [Cursor Memories](https://docs.cursor.com/en/context/memories): project memory already present, sometimes requires user approval.
+- [Anthropic Claude Code memory guide](https://support.claude.com/en/articles/14554000-claude-code-power-user-tips): native auto-memory and project instructions; standalone session recap is a commodity.
+- [GitHub Actions REST API](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run): retrieve run identity, SHA, conclusion with scoped Actions-read access for private repositories.
+
+## Research-driven shipping decision
+
+Release a read-only `handoff ci-check` command in the local CLI before attempting a hosted verification service. It checks the selected GitHub Actions run against the handoff's exact recorded commit. It never promotes an agent claim to a verified fact, never executes agent-authored instructions and never claims that CI pass proves deployment or security. A dirty worktree, changed commit or synthetic PR-merge SHA must not yield a fully current actionable handoff.
+
+The next step after technical validation is a **paired pilot** using no fewer than 12 non-sensitive interrupted tasks across at least two agents and multiple developers, comparing native memory/docs, Hivemind (where consented) and BrainShare handoffs. Track: correct first action, successful acceptance criteria, false completion claims, time-to-resume, context tokens, operator setup time and any data oversharing.
+
+**Stop/adjust rule:** If equivalent tasks are not completed more reliably, or if operator time outweighs saved time, do not put the workflow behind a subscription. Interview the participants to learn whether source verification, handoff UX or retrieval was actually useful.
+
+Do not automatically upload Hivemind summaries or Claude session transcripts: they may contain proprietary source, credentials, customer data, or adversarial text. Any future integration must be opt-in, read-only by default, project-scoped, redacted and independently permission-checked.
