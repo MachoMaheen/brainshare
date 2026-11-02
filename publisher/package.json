@@ -19,5 +19,6 @@
     "typescript": "^5.3.3",
     "vitest": "^1.6.0",
     "wrangler": "^3.50.0"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }
