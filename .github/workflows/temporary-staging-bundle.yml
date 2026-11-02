@@ -50,16 +50,22 @@ jobs:
         with:
           node-version: "22"
       - name: Test deployed staging URL (synthetic fixtures, anonymous requests)
-        run: node publisher/test/remote-staging-smoke.mjs
-      - name: Record successful staging smoke result on temporary branch
+        id: smoke
+        run: |
+          mkdir -p staging-dist
+          node publisher/test/remote-staging-smoke.mjs 2>&1 | tee staging-dist/remote-smoke.log
+      - name: Record remote smoke result on temporary branch
+        if: always()
+        env:
+          SMOKE_STATUS: ${{ steps.smoke.outcome }}
         run: |
           git fetch origin chore/temporary-staging-worker-bundle
           git checkout -B smoke-result origin/chore/temporary-staging-worker-bundle
           mkdir -p staging-dist
-          printf '{"status":"passed","test":"remote-http-smoke","commit":"%s"}\n' "$GITHUB_SHA" > staging-dist/remote-smoke-result.json
+          printf '{"status":"%s","test":"remote-http-smoke","commit":"%s"}\\n' "$SMOKE_STATUS" "$GITHUB_SHA" > staging-dist/remote-smoke-result.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add staging-dist/remote-smoke-result.json
+          git add staging-dist/remote-smoke-result.json staging-dist/remote-smoke.log
           if ! git diff --cached --quiet; then
             git commit -m 'test: record passing remote staging smoke check'
             git push origin HEAD:chore/temporary-staging-worker-bundle
