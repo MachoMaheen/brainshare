@@ -1,6 +1,8 @@
 # BrainShare
 
-**The open context layer for Markdown.**
+**Project context that survives people, sessions, and agents.**
+
+The open context layer for Markdown.
 
 BrainShare turns local Markdown into **Slices**: curated, stable, permission-aware context that humans can browse and agents can call.
 
@@ -14,7 +16,7 @@ BrainShare turns local Markdown into **Slices**: curated, stable, permission-awa
 
 **Existing live demo →** https://brainshare-publisher.machomaheen.workers.dev/share/letter
 
-> This branch contains the platform-foundation work. The existing Obsidian product remains compatible while BrainShare is being generalized into an editor-neutral platform.
+> BrainShare includes a local CLI, Viewer, MCP server, Obsidian plugin and VS Code adapter. Hosted teams, OAuth-based managed deployment and independently attested handoff results are future work.
 
 ---
 
@@ -163,6 +165,29 @@ Current workflow:
 The local bridge binds to `127.0.0.1`, only exposes the bundled Viewer shell, and restricts project reads to Markdown files inside the selected root.
 
 A native desktop/Tauri shell is a packaging step after this workflow is validated; Slice semantics do not depend on Tauri.
+
+### Verified Handoff v1
+
+Keep the state of an interrupted engineering task portable across developers and AI coding agents. A handoff is scoped to a BrainShare Slice and records the Git revision, blockers, next steps and claims.
+
+```bash
+# Create the Slice once (or use one you already have)
+node cli/brainshare.mjs slice create architecture \
+  --title "Architecture" --include "README.md,docs/**/*.md"
+
+# Save task state for the next person or agent
+node cli/brainshare.mjs handoff create architecture \
+  --task "Finish authentication integration" \
+  --next "Run staging integration tests" \
+  --claim "The coding agent reports that unit tests passed"
+
+# Check whether the recorded Git SHA or Slice revision is stale
+node cli/brainshare.mjs handoff check architecture
+```
+
+Handoffs are local JSON files, Git-ignored by default. The MCP server exposes read-only `get_handoff`. **A current revision is not proof that tests passed or work was completed**: agent claims remain explicitly `unverified`. The CLI doesn't collect raw chat transcripts or run code supplied in a handoff. Review a handoff before deliberately sharing it.
+
+See [CLI handoff documentation](./cli/README.md) and the [research, competitor comparison and validation plan](./docs/RESEARCH_AGENT_CONTINUITY.md).
 
 ### BrainShare MCP
 
