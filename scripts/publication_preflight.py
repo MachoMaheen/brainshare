@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import posixpath
 import re
 import unicodedata
 import urllib.parse
@@ -138,9 +139,12 @@ def scan_vault(root: Path) -> dict:
                 if Path(raw).suffix.lower() not in ASSET_EXTS:
                     fail("unsupported_embedded_resource",rel,i)
                     continue
-                candidate=(Path(rel).parent / raw).as_posix()
+                candidate=posixpath.normpath(posixpath.join(posixpath.dirname(rel),raw))
+                if candidate==".." or candidate.startswith("../"):
+                    fail("unsafe_image_reference",rel,i)
+                    continue
                 # Obsidian-style embeds are often vault-root or basename relative.
-                options=[candidate,raw]
+                options=[candidate,posixpath.normpath(raw)]
                 options += [p for p in images if Path(p).name.casefold()==Path(raw).name.casefold()]
                 matches={lower_paths[unicodedata.normalize("NFKC",p).casefold()]
                          for p in options if unicodedata.normalize("NFKC",p).casefold() in lower_paths}
