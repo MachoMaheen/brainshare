@@ -42,3 +42,37 @@ jobs:
             git commit -m 'build: refresh disposable staging Worker from merged main'
             git push origin HEAD:chore/temporary-staging-worker-bundle
           fi
+
+  remote-http-smoke:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify anonymous staging HTTP security
+        id: smoke
+        shell: bash
+        run: |
+          mkdir -p /tmp/brainshare-staging-smoke
+          set -o pipefail
+          node publisher/test/remote-staging-smoke.mjs 2>&1 | tee /tmp/brainshare-staging-smoke/output.log
+      - name: Save remote outcome to temporary branch
+        if: always()
+        env:
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        shell: bash
+        run: |
+          git fetch origin chore/temporary-staging-worker-bundle
+          git checkout -B smoke-record origin/chore/temporary-staging-worker-bundle
+          mkdir -p staging-dist
+          cp /tmp/brainshare-staging-smoke/output.log staging-dist/remote-smoke.log 2>/dev/null || echo "No test output" > staging-dist/remote-smoke.log
+          printf '{"outcome":"%s","revision":"%s"}\\n' "$SMOKE_OUTCOME" "$GITHUB_SHA" > staging-dist/remote-smoke-result.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add staging-dist/remote-smoke.log staging-dist/remote-smoke-result.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'test: record disposable remote smoke outcome'
+            git push origin HEAD:chore/temporary-staging-worker-bundle
+          fi
