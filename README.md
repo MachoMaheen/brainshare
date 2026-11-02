@@ -2,7 +2,7 @@
 
 **Publish a curated slice of your Obsidian vault as a live URL — wikilinks working, knowledge graph visible — in one click.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-7f6df2.svg)](./LICENSE)
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-7f6df2.svg)](./LICENSE)
 [![Cloudflare Workers](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
 [![Install via BRAT](https://img.shields.io/badge/BRAT-MachoMaheen%2Fbrainshare-5c2d91)](https://github.com/TfTHacker/obsidian42-brat)
 
@@ -268,7 +268,11 @@ PRs welcome. The codebase is intentionally small (~1500 LOC TypeScript across th
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+**GNU Affero General Public License v3 only (AGPL-3.0-only)** — see [LICENSE](./LICENSE), [copyright and previous MIT release notices](./NOTICE.md), and [contribution guidelines](./CONTRIBUTING.md).
+
+You can self-host and modify BrainShare under the AGPL. If you make a modified network-facing version available, see AGPLv3 section 13 for corresponding-source requirements. Users' notes do **not** become AGPL-licensed merely because they are published with BrainShare.
+
+Previously published BrainShare revisions under MIT retain their original MIT permissions. Services that may later provide managed deployment, billing, or support are separate product decisions; this repository's AGPL license is not a payment requirement.
 
 ---
 

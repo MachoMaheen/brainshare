@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { marked } from "marked";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,6 +215,14 @@ body {
   z-index: 1000;
   box-shadow: 0 1px 3px rgba(0,0,0,.06);
 }
+.chrome-source {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 36px; padding: 0 12px;
+  color: var(--text-muted); font-size: 12px; text-decoration: none;
+  white-space: nowrap;
+}
+.chrome-source:hover { color: var(--text-accent); }
+.chrome-source:focus-visible { outline: 2px solid var(--text-accent); outline-offset: -2px; border-radius: 999px; }
 .chrome-btn {
   width: 36px; height: 36px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -5055,7 +5064,7 @@ export interface ShellMeta {
 // shell() so AI search engines can resolve the BrainShare product entity from
 // any URL. The Article/FAQPage schemas (built per-page in renderNote) layer on
 // top of this baseline.
-const BRAINSHARE_APP_LD = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"BrainShare","applicationCategory":"Publishing","operatingSystem":"Cross-platform","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"Maheen","url":"https://github.com/MachoMaheen"},"url":"https://github.com/MachoMaheen/brainshare","sameAs":["https://brainshare-publisher.machomaheen.workers.dev"],"license":"https://opensource.org/licenses/MIT"}</script>`;
+const BRAINSHARE_APP_LD = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"BrainShare","applicationCategory":"Publishing","operatingSystem":"Cross-platform","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"Maheen","url":"https://github.com/MachoMaheen"},"url":"https://github.com/MachoMaheen/brainshare","sameAs":["https://brainshare-publisher.machomaheen.workers.dev"],"license":"https://www.gnu.org/licenses/agpl-3.0.html"}</script>`;
 
 function buildArticleLd(opts: { headline: string; datePublished?: string; dateModified?: string; author?: string; pageUrl?: string }): string {
   const obj: Record<string, unknown> = {
@@ -5146,6 +5155,7 @@ ${meta?.ogDescription ? `<meta name="twitter:description" content="${escapeAttr(
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="license" href="https://www.gnu.org/licenses/agpl-3.0.html">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(opts.title)}</title>
 <meta property="og:title" content="${ogTitle}">
@@ -5194,6 +5204,8 @@ function pageChromeHtml(opts: { hasHelp: boolean }): string {
   <span class="chrome-divider" aria-hidden="true"></span>` : "";
 
   return `<div class="page-chrome" role="group" aria-label="Page controls">${helpBtn}
+  <a class="chrome-source" href="https://github.com/MachoMaheen/brainshare" rel="noopener noreferrer" target="_blank" title="Upstream BrainShare source code (AGPLv3)">Source</a>
+  <span class="chrome-divider" aria-hidden="true"></span>
   <button class="chrome-btn theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme (auto / light / dark)" title="Theme: auto">
     <svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
   </button>

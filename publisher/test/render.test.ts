@@ -51,6 +51,13 @@ describe("extractTitle", () => {
 });
 
 describe("renderNote", () => {
+  it("offers the AGPL license and upstream source on published pages", () => {
+    const html = renderNote("# License check", "01HX0000000000000000000001");
+    expect(html).toContain('class="chrome-source"');
+    expect(html).toContain('href="https://github.com/MachoMaheen/brainshare"');
+    expect(html).toContain('<link rel="license" href="https://www.gnu.org/licenses/agpl-3.0.html">');
+  });
+
   it("emits properties panel + breadcrumb + body", () => {
     const md = "---\ntitle: Test\ntags: [foo, bar]\n---\n\n# Heading\n\nBody.\n";
     const html = renderNote(md, "01HX0000000000000000000001", { path: "Notes/Test.md" });
