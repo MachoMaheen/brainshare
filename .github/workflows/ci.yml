@@ -34,6 +34,9 @@ jobs:
         working-directory: publisher
       - run: npm test
         working-directory: publisher
+      - name: Local Worker HTTP privacy smoke test
+        run: npm run test:smoke
+        working-directory: publisher
 
   plugin:
     name: plugin build + tests
