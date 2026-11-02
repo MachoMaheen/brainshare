@@ -67,3 +67,39 @@ Possible results are `reported_success`, `pending`, `not_successful`, and `sha_m
 **Important:** This is **CI evidence**, not independent proof of a completed task, production deployment, security, or the agent's statements. A passing GitHub workflow only attests to the configured checks and the exact commit it evaluated. Worktrees with uncommitted files are not covered. Pull-request CI may check a synthetic merge commit rather than the source branch commit; that mismatch intentionally fails closed. `claimsVerified` and `handoffVerified` remain false.
 
 Avoid sending arbitrary session transcripts, secret values or customer data as task descriptions. Use scoped, read-only GitHub tokens with minimum permissions for private repositories. For public repositories, unauthenticated requests may be rate-limited.
+
+## Pre-publish safety review
+
+Preview the exact Markdown paths selected by a Slice before making any network request:
+
+```bash
+node cli/brainshare.mjs preflight architecture
+node cli/brainshare.mjs preflight architecture --block-text "internal-only"
+```
+
+The JSON report includes the Slice revision, selected file paths, effective visibility, and location-based errors/warnings. It does **not** show matching credential values or the contents of excluded documents. Error findings block publishing. Warnings about external assets and unresolved links require manual review.
+
+Publish only after inspecting the report:
+
+```bash
+node cli/brainshare.mjs publish architecture \
+  --confirm-publication \
+  --revision REVISION_FROM_PREFLIGHT \
+  --publisher https://your-worker.example \
+  --token YOUR_PUBLISHER_TOKEN
+```
+
+`--confirm-publication` is an explicit acknowledgment, not permission to override errors. A supplied revision must still match at publication time. Use environment variables for credentials rather than putting them in shell history where possible.
+
+The local Viewer presents these findings and asks for confirmation before publishing. Obsidian and VS Code check selected Markdown for recognizable credentials and active embedded HTML, then request approval. The safeguards are best-effort; **review the exact documents and assets yourself**, especially frontmatter, direct Markdown links, embedded resources, and custom HTML. Do not assume unlisted URLs are confidential.
+
+### Access model and compatibility
+
+- Slice content is accessed via `/share/<id>/...`. Gated Slices authorize every HTML, raw, search, feed, download and asset request.
+- Standalone note URLs require an explicit public standalone publish action. Ordinary Slice uploads do not grant unscoped note access.
+- Standalone canvas and unscoped asset GET routes are disabled. Embedded images resolve to authorized, Slice-scoped asset routes.
+- Existing direct-note, canvas, and `/asset/<key>` links from older publisher versions may no longer work when upgrading. Re-publish intentional standalone notes through the editor's explicit single-note flow and update old asset links.
+- A note simultaneously shared in a gated Slice cannot be read via its standalone route, even if previously marked public.
+- This is not retrospective erasure: old copies, downloaded files, crawler caches and already distributed URLs cannot be revoked by software updates.
+
+This preflight checks Markdown text and project paths, not binary asset contents; hosted data should be reviewed and safeguarded before upload. No automated scanner guarantees that sensitive content is absent.

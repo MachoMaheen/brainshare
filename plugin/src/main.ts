@@ -9,6 +9,7 @@ import {
   requestUrl,
 } from "obsidian";
 import { ulid, isValidUlid } from "./ulid";
+import { scanPublicationMarkdown } from "@brainshare/core";
 import { FolderPickerModal } from "./folder-picker";
 import { MintTokenModal } from "./mint-modal";
 import { SlicesModal } from "./slices-modal";
@@ -195,7 +196,7 @@ export default class BrainSharePlugin extends Plugin {
    */
   async publishNoteSilent(
     file: TFile,
-    opts?: { force?: boolean; hashes?: HashMap }
+    opts?: { force?: boolean; hashes?: HashMap; standalone?: boolean }
   ): Promise<{ id: string; pushed: boolean } | null> {
     const { publisherUrl, publisherToken } = this.settings;
     if (!publisherUrl || !publisherToken) return null;
@@ -203,6 +204,8 @@ export default class BrainSharePlugin extends Plugin {
     const id = this.app.metadataCache.getFileCache(file)?.frontmatter?.id;
     if (!id) return null;
     const content = await this.app.vault.read(file);
+    const findings = scanPublicationMarkdown(file.path, content);
+    if(findings.length) throw new Error(`Preflight blocked ${file.path}: ${findings.map(f=>f.code+" at line "+(f.line??"path")).join(", ")}`);
     const hash = contentHash(content);
 
     const ownCache = opts?.hashes === undefined;
@@ -219,6 +222,7 @@ export default class BrainSharePlugin extends Plugin {
         "content-type": "text/markdown",
         authorization: `Bearer ${publisherToken}`,
         "x-note-path": file.path,
+        ...(opts?.standalone ? { "x-brainshare-standalone": "public" } : {}),
       },
       body: content,
       throw: false,
@@ -560,7 +564,8 @@ export default class BrainSharePlugin extends Plugin {
       return;
     }
     try {
-      const r = await this.publishNoteSilent(file, { force: true });
+      if (!confirm(`Publish "${file.path}" as a publicly accessible standalone note? Anyone with its URL can read it. Review the contents before continuing.`)) return;
+      const r = await this.publishNoteSilent(file, { force: true, standalone: true });
       const id = r?.id ?? null;
       if (!id) {
         new Notice("BrainShare: publish failed (check publisher URL/token + console)");

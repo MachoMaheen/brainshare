@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting, TFile, TFolder } from "obsidian";
 import type BrainSharePlugin from "./main";
+import { scanPublicationMarkdown } from "@brainshare/core";
 import { MintTokenModal } from "./mint-modal";
 
 /**
@@ -371,6 +372,23 @@ export class FolderPickerModal extends Modal {
       new Notice("BrainShare: selected paths resolve to no markdown files");
       return;
     }
+
+    // Review the exact selection before the first upload. No partial batch
+    // should be sent when a selected Markdown document contains a detected secret.
+    const findings: string[] = [];
+    for (const file of files) {
+      const markdown = await this.app.vault.read(file);
+      for (const issue of scanPublicationMarkdown(file.path, markdown)) {
+        findings.push(`${file.path}:${issue.line ?? "path"} ${issue.code}`);
+      }
+    }
+    if (findings.length) {
+      new Notice("BrainShare: publishing blocked by preflight. Review the console.");
+      console.warn("BrainShare publication findings:", findings);
+      this.setStatus(`Blocked: ${findings.length} preflight finding(s)`);
+      return;
+    }
+    if (!confirm(`Publish ${files.length} selected note(s) as a ${this.gated ? "JWT-gated" : "public/unlisted"} Slice? Only selected paths will be included, but all of their content and metadata will be shared.`)) return;
 
     if (this.publishBtn) this.publishBtn.disabled = true;
 

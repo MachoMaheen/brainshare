@@ -38,7 +38,7 @@ test("bundled extension preserves universal manifest and stable identity", async
     },
     window:{
       activeTextEditor:null,registerTreeDataProvider:()=>({dispose(){}}),showErrorMessage:async(m)=>{errors.push(m);},
-      showInformationMessage:async()=>{},showWarningMessage:async()=>"Unpublish",showInputBox:async()=>undefined,
+      showInformationMessage:async()=>{},showWarningMessage:async(message)=>/^Publish\b/.test(message)?"Publish":"Unpublish",showInputBox:async()=>undefined,
       showQuickPick:async()=>undefined,showOpenDialog:async()=>undefined,withProgress:async(_o,fn)=>fn({report(){}}),
     },
     commands:{registerCommand:(name,fn)=>{commands.set(name,fn);return{dispose(){}};}},
@@ -74,11 +74,12 @@ test("bundled extension preserves universal manifest and stable identity", async
     assert.equal(commands.size,14);
     await commands.get("brainshare.publishCurrent")(note);
     assert.deepEqual(errors,[]);
+    assert.ok(calls.some(([,method])=>method==="PUT"),"approved standalone publication should upload the note");
 
     let manifest=JSON.parse(await fs.readFile(path.join(root,".brainshare","manifest.json"),"utf8"));
     assert.equal(manifest.project.name,"demo");
     assert.equal(manifest.notes["README.md"].id,id);
-    assert.equal(typeof manifest.notes["README.md"].hash,"string");
+    assert.equal(typeof manifest.notes["README.md"].hash,"string",JSON.stringify({calls,errors,manifest}));
     assert.equal("slices" in manifest,false);
     const adapter=JSON.parse(await fs.readFile(path.join(root,".brainshare","vscode.json"),"utf8"));
     assert.match(adapter.notes["README.md"].url,/publisher\.test/);

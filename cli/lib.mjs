@@ -2,6 +2,7 @@ import fs from "node:fs/promises"; import path from "node:path";
 import { ensureManifestIdentities, compileSlice } from "@brainshare/core";
 import { validateProjectManifest, validateSlicesFile } from "@brainshare/protocol";
 import { BrainSharePublisherClient } from "@brainshare/sdk";
+import { inspectSlicePublication } from "./preflight.mjs";
 export const META_DIR=".brainshare";
 export async function readJson(file){return JSON.parse(await fs.readFile(file,"utf8"));}
 export async function writeJson(file,data){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,JSON.stringify(data,null,2)+"\n");}
@@ -9,4 +10,23 @@ export async function initProject(root,name=path.basename(root)){const dir=path.
 export async function walkMarkdown(root,current=root,out=[]){for(const e of await fs.readdir(current,{withFileTypes:true})){if([".git","node_modules",".brainshare"].includes(e.name))continue;const p=path.join(current,e.name);if(e.isDirectory())await walkMarkdown(root,p,out);else if(e.isFile()&&/\.md$/i.test(e.name))out.push(path.relative(root,p).replace(/\\/g,"/"));}return out.sort();}
 export async function loadProject(root){await initProject(root);const manifest=validateProjectManifest(await readJson(path.join(root,META_DIR,"manifest.json")));const slices=validateSlicesFile(await readJson(path.join(root,META_DIR,"slices.json")));const paths=await walkMarkdown(root);const files={};for(const p of paths)files[p]=await fs.readFile(path.join(root,p),"utf8");const next=ensureManifestIdentities(manifest,files);if(JSON.stringify(next)!==JSON.stringify(manifest))await writeJson(path.join(root,META_DIR,"manifest.json"),next);return{manifest:next,slices,files};}
 export async function compileProjectSlice(root,id){const p=await loadProject(root);const def=p.slices.slices[id];if(!def)throw new Error(`Unknown slice: ${id}`);return{...p,slice:compileSlice(p.manifest,def,p.files)};}
-export async function publishProjectSlice(root,id,{publisher,token}){const p=await compileProjectSlice(root,id);const client=new BrainSharePublisherClient({baseUrl:publisher,token});for(const f of p.slice.files)await client.publishNote(f.id,f.path,p.files[f.path]);const result=await client.publishSlice(p.slice);return{slice:p.slice,url:result.url};}
+export async function preflightProjectSlice(root,id,options={}) {
+  const p=await compileProjectSlice(root,id);
+  return {project:p,report:inspectSlicePublication({slice:p.slice,files:p.files,blockText:options.blockText??[]})};
+}
+export async function publishProjectSlice(root,id,{publisher,token,confirmPublication=false,expectedRevision,blockText=[]}) {
+  // All checks happen before the first network request.
+  const {project:p,report}=await preflightProjectSlice(root,id,{blockText});
+  if(report.errors) {
+    const error=new Error("Publication blocked: "+report.errors+" preflight error(s). Run 'brainshare preflight "+id+"' for findings.");
+    error.preflight=report; throw error;
+  }
+  if(!confirmPublication || (expectedRevision && expectedRevision!==p.slice.revision)) {
+    const error=new Error("Review preflight and explicitly confirm the current Slice before publishing.");
+    error.preflight=report; throw error;
+  }
+  const client=new BrainSharePublisherClient({baseUrl:publisher,token});
+  for(const f of p.slice.files)await client.publishNote(f.id,f.path,p.files[f.path]);
+  const result=await client.publishSlice(p.slice);
+  return {slice:p.slice,url:result.url,preflight:report};
+}

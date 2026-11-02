@@ -328,6 +328,12 @@ export default {
           return new Response("note too large (>1MB)", { status: 413 });
         }
         await env.NOTES.put(`note:${ulid}`, body);
+        // A Slice upload never enables unscoped note access.
+        if (req.headers.get("x-brainshare-standalone") === "public") {
+          await env.NOTES.put(`standalone:${ulid}`, "1");
+        } else {
+          await env.NOTES.delete(`standalone:${ulid}`);
+        }
         let notePath = req.headers.get("x-note-path");
         if (notePath) {
           // Path may arrive URI-encoded (HTTP headers are latin-1, so non-ASCII paths
@@ -356,6 +362,7 @@ export default {
       }
       if (req.method === "DELETE") {
         await env.NOTES.delete(`note:${ulid}`);
+        await env.NOTES.delete(`standalone:${ulid}`);
         await env.NOTES.delete(`meta:${ulid}`);
         // Invalidate caches + rebuild indexes for all wrappers that include this note
         const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
@@ -435,21 +442,37 @@ export default {
         return json({ key, url: `${origin}/asset/${key}` });
       }
       if (req.method === "GET") {
-        const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
-        if (!value) return new Response("not found", { status: 404 });
-        const ct = (metadata as { contentType?: string } | null)?.contentType ?? "application/octet-stream";
-        return new Response(value, {
-          headers: {
-            "content-type": ct,
-            "cache-control": "public, max-age=31536000, immutable",
-          },
-        });
+        // Public asset keys bypass Slice authorization; use scoped asset routes.
+        return new Response("not found", { status: 404 });
       }
       if (req.method === "DELETE" && !unauthorized(env, req)) {
         await env.NOTES.delete(`asset:${key}`);
         return new Response(null, { status: 204 });
       }
       return new Response("method not allowed", { status: 405 });
+    }
+
+    // GET /share/:wrapId/asset/:key — membership and access checked before reading.
+    const scopedAssetMatch = path.match(new RegExp("^/share/([a-zA-Z0-9_-]{1,64})/asset/([a-f0-9]{16,128})$", "i"));
+    if (scopedAssetMatch && req.method === "GET") {
+      const [, wrapId, rawKey] = scopedAssetMatch;
+      const key = rawKey.toLowerCase();
+      const wrapRaw = await env.NOTES.get(`wrap:${wrapId}`);
+      if (!wrapRaw) return new Response("not found", { status: 404 });
+      const wrap = JSON.parse(wrapRaw) as WrapData;
+      if (!Object.values(wrap.assets ?? {}).some(value => value.toLowerCase() === key))
+        return new Response("asset not in this share", { status: 403 });
+      const gate = await checkGate(env, wrap, wrapId, url, req);
+      if (!gate.ok) return gate.resp;
+      const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
+      if (!value) return new Response("not found", { status: 404 });
+      const ct = (metadata as { contentType?: string } | null)?.contentType ?? "application/octet-stream";
+      return new Response(value, { headers: {
+        "content-type": ct,
+        "cache-control": wrap.gated ? "private, no-store" : "public, max-age=300",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "sandbox; default-src 'none'",
+      } });
     }
 
     // GET /api/export — stream every KV key/value as NDJSON for backup (auth required)
@@ -1030,18 +1053,10 @@ ${entries}
       return new Response(current.md, { headers: { "content-type": "text/markdown; charset=utf-8" } });
     }
 
-    // GET /c/:ulid — standalone canvas (no wrapper context)
-    const standaloneCanvasMatch = path.match(/^\/c\/([0-9A-HJKMNP-TV-Z]{26})$/);
-    if (standaloneCanvasMatch && req.method === "GET") {
-      const ulid = standaloneCanvasMatch[1];
-      const [canvasJson, metaRaw] = await Promise.all([
-        env.NOTES.get(`canvas:${ulid}`),
-        env.NOTES.get(`canvasmeta:${ulid}`),
-      ]);
-      if (!canvasJson) return html("<h1>404</h1><p>canvas not found</p>", 404);
-      const canvasPath = metaRaw ? (JSON.parse(metaRaw) as NoteMeta).path : undefined;
-      return html(renderCanvas(canvasJson, ulid, { path: canvasPath }));
-    }
+    // Standalone canvases are intentionally not exposed. Use /share/:id/c/:ulid.
+    const standaloneCanvasMatch = path.match(new RegExp("^/c/([0-9A-HJKMNP-TV-Z]{26})$"));
+    if (standaloneCanvasMatch && req.method === "GET")
+      return html("<h1>404</h1><p>canvas not found</p>", 404);
 
     // GET /share/:id — wrapper landing page
     const shareMatch = path.match(/^\/share\/([a-zA-Z0-9_-]{1,64})$/);
@@ -1074,6 +1089,23 @@ ${entries}
     const getMatch = path.match(/^\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (getMatch && req.method === "GET") {
       const ulid = getMatch[1];
+      const standalone = await env.NOTES.get(`standalone:${ulid}`);
+      if (!standalone) return html("<h1>404</h1><p>note not found</p>", 404);
+      const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
+      if (refsRaw) {
+        let refs: string[];
+        try { refs = JSON.parse(refsRaw) as string[]; }
+        catch { return forbidden(); }
+        if (!Array.isArray(refs)) return forbidden();
+        for (const wrapId of refs) {
+          const raw = await env.NOTES.get(`wrap:${wrapId}`);
+          if (!raw) continue;
+          let referenced: WrapData;
+          try { referenced = JSON.parse(raw) as WrapData; }
+          catch { return forbidden(); }
+          if (referenced.gated) return forbidden();
+        }
+      }
       const [md, notePath] = await Promise.all([
         env.NOTES.get(`note:${ulid}`),
         getNotePath(env.NOTES, ulid),

@@ -3122,7 +3122,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     if (!ctx?.assets) return null;
     // Match either by full path or by basename — bulk-publish stores both forms
     const direct = ctx.assets[filename] || ctx.assets[filename.split("/").pop() ?? filename];
-    return direct ? `/asset/${direct}` : null;
+    return direct && ctx.shareBase ? `${ctx.shareBase}/asset/${direct}` : null;
   };
 
   // ![[image.jpg]] and ![[image.jpg|alt]] — Obsidian-style image embeds (must run before
@@ -3133,7 +3133,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
       const t = target.trim();
       const url = assetUrl(t);
       if (url) return `<img src="${escapeAttr(url)}" alt="${escapeAttr((alias ?? t).trim())}" class="embedded-image" loading="lazy">`;
-      return `<span class="embed-missing" title="asset not in this share">[missing: ${escapeHtml(t)}]</span>`;
+      return `<span class="embed-missing" title="asset not in this share">[asset not shared]</span>`;
     }
   );
 
@@ -3169,7 +3169,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
           return `<a class="wikilink-internal wikilink-canvas" href="${ctx.shareBase}/c/${canvasUlid}${tq}" title="canvas">${escapeHtml(label)}</a>`;
         }
       }
-      return `<span class="wikilink-private" title="not in this published slice">${escapeHtml(label)}</span>`;
+      return `<span class="wikilink-private" title="not in this published slice">[not shared]</span>`;
     }
   );
 

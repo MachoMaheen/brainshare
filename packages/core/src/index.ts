@@ -40,3 +40,6 @@ export function buildKnowledgeGraph(files: Record<string,string>): KnowledgeGrap
   for(const map of [backlinks,outgoing])for(const key of Object.keys(map))map[key]=[...new Set(map[key])].sort();
   return{nodes:paths.map(path=>({path,title:docs.get(path)!.title})),edges,backlinks,outgoing};
 }
+
+export { scanPublicationMarkdown } from "./preflight";
+export type { PublicationFinding } from "./preflight";
