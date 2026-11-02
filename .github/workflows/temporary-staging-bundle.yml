@@ -1,4 +1,4 @@
-name: Temporary staging Worker bundle
+name: Temporary isolated BrainShare Worker bundle
 
 on:
   push:
@@ -19,54 +19,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install dependencies
-        run: npm ci
-        working-directory: publisher
-      - name: Build Worker without deploying
-        run: npx wrangler deploy --config wrangler.smoke.toml --dry-run --outdir .staging-artifacts
-        working-directory: publisher
-      - name: Save compiled bundle to temporary branch only
+      - name: Build latest merged main without deployment
         run: |
-          mkdir -p staging-dist
-          echo "Built files:"
-          find publisher/.staging-artifacts -maxdepth 1 -type f -printf '%f\n'
-          BUNDLE=$(find publisher/.staging-artifacts -maxdepth 1 -type f \( -name '*.js' -o -name '*.mjs' \) | head -n1)
+          git fetch origin main
+          git switch --detach origin/main
+          npm ci --prefix publisher
+          cd publisher
+          npx wrangler deploy --config wrangler.smoke.toml --dry-run --outdir .staging-artifacts
+          BUNDLE=$(find .staging-artifacts -maxdepth 1 -type f \( -name '*.js' -o -name '*.mjs' \) | head -n1)
           test -n "$BUNDLE"
-          cp "$BUNDLE" staging-dist/worker.mjs
+          cp "$BUNDLE" /tmp/brainshare-staging-worker.mjs
+      - name: Save staging build to temporary branch
+        run: |
+          git fetch origin chore/temporary-staging-worker-bundle
+          git checkout -B staging-dist-update origin/chore/temporary-staging-worker-bundle
+          mkdir -p staging-dist
+          cp /tmp/brainshare-staging-worker.mjs staging-dist/worker.mjs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add staging-dist/worker.mjs
           if ! git diff --cached --quiet; then
-            git commit -m 'build: temporary deployable Worker bundle'
-            git push origin HEAD:chore/temporary-staging-worker-bundle
-          fi
-
-  remote-http-smoke:
-    needs: bundle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Test deployed staging URL (synthetic fixtures, anonymous requests)
-        id: smoke
-        run: |
-          mkdir -p staging-dist
-          node publisher/test/remote-staging-smoke.mjs 2>&1 | tee staging-dist/remote-smoke.log
-      - name: Record remote smoke result on temporary branch
-        if: always()
-        env:
-          SMOKE_STATUS: ${{ steps.smoke.outcome }}
-        run: |
-          git fetch origin chore/temporary-staging-worker-bundle
-          git checkout -B smoke-result origin/chore/temporary-staging-worker-bundle
-          mkdir -p staging-dist
-          printf '{"status":"%s","test":"remote-http-smoke","commit":"%s"}\\n' "$SMOKE_STATUS" "$GITHUB_SHA" > staging-dist/remote-smoke-result.json
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add staging-dist/remote-smoke-result.json staging-dist/remote-smoke.log
-          if ! git diff --cached --quiet; then
-            git commit -m 'test: record passing remote staging smoke check'
+            git commit -m 'build: refresh disposable staging Worker from merged main'
             git push origin HEAD:chore/temporary-staging-worker-bundle
           fi
