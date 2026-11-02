@@ -7,7 +7,7 @@ BrainShare turns local Markdown into **Slices**: curated, stable, permission-awa
 > **Share the context behind the work.**  
 > Lend your brain. Anyone can read it. Anything can call it.
 
-[![License: MIT](https://img.shields.io/badge/current%20license-MIT-7f6df2.svg)](./LICENSE)
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-7f6df2.svg)](./LICENSE)
 [![Cloudflare Workers](https://img.shields.io/badge/data%20plane-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
 [![Obsidian](https://img.shields.io/badge/client-Obsidian-7c3aed)](./plugin)
 [![VS Code](https://img.shields.io/badge/client-VS%20Code-007acc)](./vscode-extension)
@@ -395,11 +395,11 @@ See:
 
 ## License and commercialization
 
-**The repository is currently MIT licensed.** Existing MIT grants remain valid.
+The repository is **GNU AGPL-3.0-only** as of the merged license migration in PR #7; see [LICENSE](./LICENSE), [NOTICE](./NOTICE.md), and [CONTRIBUTING](./CONTRIBUTING.md). Previous MIT-licensed versions retain their original MIT permissions.
 
-The approved product strategy is to evaluate a future community/commercial model (including AGPL-style network copyleft for appropriate components, permissive protocol/SDK surfaces, and a commercial/OEM license), but **this repository has not been relicensed by this platform-foundation work**.
+This platform foundation and its protocol/SDK packages follow the repository AGPL license unless and until separately relicensed with proper rights review. Managed deployment, support and team governance are potential paid services; AGPL does not prohibit competing commercial use.
 
-Any license migration should happen only after copyright/contributor review and proper legal review. See [`docs/LICENSE_STRATEGY.md`](./docs/LICENSE_STRATEGY.md).
+See [docs/LICENSE_STRATEGY.md](./docs/LICENSE_STRATEGY.md) for the updated decision record.
 
 ---
 
