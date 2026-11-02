@@ -18,7 +18,7 @@ import {
 } from "./render";
 import { signJWT, verifyJWT, TokenClaims } from "./jwt";
 import { zipSync } from "fflate";
-import { MAX_ASSET_BYTES, sniffSafeImage, safeStoredImageMime, digestSha256Hex } from "./asset-security";
+import { MAX_ASSET_BYTES, sniffSafeImage, safeStoredImageMime, digestSha256Hex, hasEmbeddedImageMetadata } from "./asset-security";
 
 interface Env {
   NOTES: KVNamespace;
@@ -444,6 +444,8 @@ export default {
         if (buf.byteLength > MAX_ASSET_BYTES) return new Response("asset too large (>5MB)", { status: 413 });
         const detected = sniffSafeImage(new Uint8Array(buf));
         if (!detected) return new Response("unsupported or unsafe image data", { status: 415 });
+        if (hasEmbeddedImageMetadata(new Uint8Array(buf)))
+          return new Response("image metadata must be stripped before upload", { status: 415 });
         if (declared !== detected) return new Response("image MIME does not match content", { status: 415 });
         if (await digestSha256Hex(buf) !== key) return new Response("asset SHA-256 mismatch", { status: 400 });
         await env.NOTES.put(`asset:${key}`, buf, { metadata: { contentType: detected } });
@@ -477,7 +479,7 @@ export default {
       // Legacy assets may have untrusted MIME metadata. Refuse unsupported
       // stored formats even when referenced by a historical wrapper.
       const ct = safeStoredImageMime(metadata);
-      if (!ct || !sniffSafeImage(new Uint8Array(value)) || sniffSafeImage(new Uint8Array(value)) !== ct)
+      if (!ct || sniffSafeImage(new Uint8Array(value)) !== ct || hasEmbeddedImageMetadata(new Uint8Array(value)))
         return new Response("unsupported asset", { status: 415, headers: { "cache-control": "no-store" } });
       return new Response(value, { headers: {
         "content-type": ct,
