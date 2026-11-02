@@ -40,3 +40,14 @@ jobs:
             git commit -m 'build: temporary deployable Worker bundle'
             git push origin HEAD:chore/temporary-staging-worker-bundle
           fi
+
+  remote-http-smoke:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test deployed staging URL (synthetic fixtures, anonymous requests)
+        run: node publisher/test/remote-staging-smoke.mjs
