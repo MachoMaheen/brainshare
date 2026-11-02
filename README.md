@@ -16,7 +16,7 @@ BrainShare turns local Markdown into **Slices**: curated, stable, permission-awa
 
 **Existing live demo →** https://brainshare-publisher.machomaheen.workers.dev/share/letter
 
-> BrainShare includes a local CLI, Viewer, MCP server, Obsidian plugin and VS Code adapter. Hosted teams, OAuth-based managed deployment and independently attested handoff results are future work.
+> BrainShare includes a local CLI, Viewer, MCP server, Obsidian plugin and VS Code adapter.
 
 ---
 
@@ -187,7 +187,7 @@ node cli/brainshare.mjs handoff check architecture
 
 Handoffs are local JSON files, Git-ignored by default. The MCP server exposes read-only `get_handoff`. **A current revision is not proof that tests passed or work was completed**: agent claims remain explicitly `unverified`. The CLI doesn't collect raw chat transcripts or run code supplied in a handoff. Review a handoff before deliberately sharing it.
 
-See [CLI handoff documentation](./cli/README.md) and the [research, competitor comparison and validation plan](./docs/RESEARCH_AGENT_CONTINUITY.md).
+See [CLI handoff documentation](./cli/README.md).
 
 ### BrainShare MCP
 
@@ -391,41 +391,15 @@ Point Obsidian, VS Code or the CLI at the resulting Worker URL.
 
 ---
 
-## Product direction
+## Planned improvements
 
-BrainShare is being built around three reinforcing loops:
-
-1. **Read local context** — especially Markdown produced by humans and coding agents.
-2. **Curate connected context into a Slice.**
-3. **Share the same logical context with humans and machines.**
-
-Future protocol-compatible directions include:
-
-- hosted immutable Snapshot revisions
-- “changed since you last read” Slice diffs
-- signed/provenance manifests and source Git commits
-- context-budget assembly for agents
-- Managed BrainShare Cloud / Managed BYOC
-- team/project brains
-- cross-publisher federation
-
-These are roadmap directions, not claims about the current release.
-
-See:
-
-- [`docs/ARCHITECTURE_V1.md`](./docs/ARCHITECTURE_V1.md)
-- [`docs/ROADMAP.md`](./docs/ROADMAP.md)
-- [`docs/LICENSE_STRATEGY.md`](./docs/LICENSE_STRATEGY.md)
+BrainShare's ongoing engineering priorities include cross-editor compatibility, safe publishing, accessible reading, revision-aware context retrieval and reliable project handoffs. See the [public roadmap](./docs/ROADMAP.md) for contributor-facing milestones.
 
 ---
 
-## License and commercialization
+## License
 
-The repository is **GNU AGPL-3.0-only** as of the merged license migration in PR #7; see [LICENSE](./LICENSE), [NOTICE](./NOTICE.md), and [CONTRIBUTING](./CONTRIBUTING.md). Previous MIT-licensed versions retain their original MIT permissions.
-
-This platform foundation and its protocol/SDK packages follow the repository AGPL license unless and until separately relicensed with proper rights review. Managed deployment, support and team governance are potential paid services; AGPL does not prohibit competing commercial use.
-
-See [docs/LICENSE_STRATEGY.md](./docs/LICENSE_STRATEGY.md) for the updated decision record.
+BrainShare is licensed under **GNU AGPL-3.0-only**. See [LICENSE](./LICENSE), [NOTICE](./NOTICE.md), and [CONTRIBUTING](./CONTRIBUTING.md). Earlier MIT releases retain their original permissions.
 
 ---
 
@@ -433,7 +407,7 @@ See [docs/LICENSE_STRATEGY.md](./docs/LICENSE_STRATEGY.md) for the updated decis
 
 Single-file Markdown publishing is useful. Folder publishing is useful. A viewer is useful. MCP is useful.
 
-None of those alone is the moat.
+The common foundation is a portable, curated context Slice.
 
 BrainShare's bet is that the durable primitive is **curated context**:
 
