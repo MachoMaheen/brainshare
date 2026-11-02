@@ -89,9 +89,11 @@ describe("publication privacy boundaries",()=>{
     expect(html).toContain("[not shared]");
     expect((await request("/share/public/"+HIDDEN)).status).toBe(403);
     expect((await request("/share/public/"+HIDDEN+"/og.svg")).status).toBe(403);
-    const search=await request("/share/public/api/search?q="+CANARY);
+    const search=await request("/share/public/api/search?q=SECRET_CANARY");
     expect(search.status).toBe(200);
-    expect(await search.text()).not.toContain(CANARY);
+    const searchData=await search.json();
+    expect(searchData.matches).toEqual([]);
+    expect(JSON.stringify(searchData)).not.toContain(CANARY);
     const feed=await request("/share/public/feed.xml");
     expect(await feed.text()).not.toContain(CANARY);
     const download=await request("/share/public/download");
