@@ -198,6 +198,7 @@ The local MCP server exposes project knowledge without introducing another AI/ch
 - `get_note`
 - `search_notes`
 - `get_context`
+- `get_handoff`
 
 BrainShare is the **context/provenance layer**. Claude, Codex, ChatGPT, Cursor or another agent can remain the reasoning interface.
 
