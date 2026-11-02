@@ -58,6 +58,20 @@ jobs:
         working-directory: plugin
       - name: Sanity-check that main.js was emitted
         run: test -f plugin/main.js && wc -l plugin/main.js
+      - name: Assemble Obsidian beta package
+        run: |
+          mkdir -p dist/brainshare
+          cp plugin/main.js plugin/manifest.json dist/brainshare/
+          if test -f plugin/styles.css; then cp plugin/styles.css dist/brainshare/; fi
+          cd dist
+          zip -q -r brainshare-obsidian-beta.zip brainshare
+          test -s brainshare-obsidian-beta.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brainshare-obsidian-beta
+          path: dist/brainshare-obsidian-beta.zip
+          if-no-files-found: error
+
 
   wrapper:
     name: wrapper CLI type-check
