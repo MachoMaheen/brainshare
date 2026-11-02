@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { createHash } from "node:crypto";
+import { scanPublicationMarkdown } from "@brainshare/core";
 import { apiFromSettings, BrainShareApi, publisherTokenSecretKey } from "./api";
 import { SliceRecord, StateStore } from "./state";
 
@@ -125,23 +126,27 @@ async function publishCurrent(context: vscode.ExtensionContext, uri?: vscode.Uri
   if (!target || target.path.toLowerCase().endsWith(".md") === false) {
     throw new Error("Open or select a Markdown file first.");
   }
-  const result = await publishOne(context, target, true);
+  const approval = await vscode.window.showWarningMessage("Publish this Markdown file as a publicly accessible standalone note?", { modal: true }, "Publish");
+  if (approval !== "Publish") return;
+  const result = await publishOne(context, target, true, true);
   await vscode.env.clipboard.writeText(result.url);
   void vscode.window.showInformationMessage(`BrainShare published ${requireStore().relative(target)} — URL copied.`);
 }
 
-async function publishOne(context: vscode.ExtensionContext, uri: vscode.Uri, force: boolean): Promise<{ id: string; url: string; pushed: boolean }> {
+async function publishOne(context: vscode.ExtensionContext, uri: vscode.Uri, force: boolean, standalone = false): Promise<{ id: string; url: string; pushed: boolean }> {
   const stateStore = requireStore();
   const api = await apiFromSettings(context);
   const identityMode = vscode.workspace.getConfiguration("brainshare").get<"sidecar" | "frontmatter">("identityMode", "sidecar");
   const id = await stateStore.getOrCreateId(uri, identityMode);
   const markdown = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+  const findings = scanPublicationMarkdown(stateStore.relative(uri), markdown);
+  if (findings.length) throw new Error("Publication blocked by preflight: "+findings.map(f=>f.code+" at "+(f.line??"path")).join(", "));
   const hash = createHash("sha256").update(markdown).digest("hex");
   const state = await stateStore.read();
   const path = stateStore.relative(uri);
   const previous = state.notes[path];
   if (!force && previous?.hash === hash && previous.url) return { id, url: previous.url, pushed: false };
-  const result = await api.publishNote(id, path, markdown);
+  const result = await api.publishNote(id, path, markdown, { standalone });
   await stateStore.recordPublishedNote(uri, { id, url: result.url, hash, publishedAt: new Date().toISOString() });
   return { id, url: result.url, pushed: true };
 }
@@ -174,6 +179,8 @@ async function publishFolder(context: vscode.ExtensionContext, uri?: vscode.Uri)
   ], { title: "Slice access" });
   if (!visibility) return;
 
+  const approval = await vscode.window.showWarningMessage(`Publish ${files.length} selected Markdown files as a ${visibility.gated?"JWT-gated":"public/unlisted"} Slice?`, { modal: true }, "Publish");
+  if (approval !== "Publish") return;
   const api = await apiFromSettings(context);
   const published = await publishFiles(context, files);
   const existing = await api.getWrapper(id);
@@ -205,6 +212,15 @@ async function publishFolder(context: vscode.ExtensionContext, uri?: vscode.Uri)
 }
 
 async function publishFiles(context: vscode.ExtensionContext, files: vscode.Uri[]): Promise<Array<{ id: string; url: string }>> {
+  // Inspect the full batch before its first network write.
+  const stateStore = requireStore();
+  const allFindings: string[] = [];
+  for(const file of files) {
+    const content = Buffer.from(await vscode.workspace.fs.readFile(file)).toString("utf8");
+    for(const issue of scanPublicationMarkdown(stateStore.relative(file), content))
+      allFindings.push(`${stateStore.relative(file)}:${issue.line??"path"} ${issue.code}`);
+  }
+  if(allFindings.length)throw new Error("Publication blocked by preflight: "+allFindings.join("; "));
   return await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Publishing BrainShare slice", cancellable: false }, async (progress) => {
     const out: Array<{ id: string; url: string }> = [];
     for (let i = 0; i < files.length; i++) {
