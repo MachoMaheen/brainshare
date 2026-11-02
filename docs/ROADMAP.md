@@ -14,7 +14,7 @@
 - universal CLI
 - local Viewer MVP + agent-output watcher
 - preserve Worker + Cache API + KV data plane
-- document licensing migration without changing the existing MIT grant yet
+- reconcile the platform foundation with AGPL-3.0-only after the repository license migration; preserve prior MIT release rights
 
 ## P1 — adapter convergence
 
