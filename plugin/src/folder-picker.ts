@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Setting, TFile, TFolder } from "obsidian";
 import type BrainSharePlugin from "./main";
 import { scanPublicationMarkdown } from "@brainshare/core";
+import { resolveNoteMedia } from "./media";
 import { MintTokenModal } from "./mint-modal";
 
 /**
@@ -376,10 +377,16 @@ export class FolderPickerModal extends Modal {
     // Review the exact selection before the first upload. No partial batch
     // should be sent when a selected Markdown document contains a detected secret.
     const findings: string[] = [];
+    const previewAssets = new Set<string>();
     for (const file of files) {
       const markdown = await this.app.vault.read(file);
       for (const issue of scanPublicationMarkdown(file.path, markdown)) {
         findings.push(`${file.path}:${issue.line ?? "path"} ${issue.code}`);
+      }
+      try {
+        for (const asset of resolveNoteMedia(this.app, file, markdown)) previewAssets.add(asset.file.path);
+      } catch (e) {
+        findings.push(e instanceof Error ? e.message : String(e));
       }
     }
     if (findings.length) {
@@ -388,19 +395,26 @@ export class FolderPickerModal extends Modal {
       this.setStatus(`Blocked: ${findings.length} preflight finding(s)`);
       return;
     }
-    if (!confirm(`Publish ${files.length} selected note(s) as a ${this.gated ? "JWT-gated" : "public/unlisted"} Slice? Only selected paths will be included, but all of their content and metadata will be shared.`)) return;
+    const assetPaths = [...previewAssets].sort();
+    const assetPreview = assetPaths.length
+      ? `\n\nAlso publish ${assetPaths.length} image(s):\n${assetPaths.slice(0, 20).map(p => "• " + p).join("\n")}${assetPaths.length > 20 ? `\n… and ${assetPaths.length - 20} more` : ""}`
+      : "";
+    if (!confirm(`Publish ${files.length} selected note(s) as a ${this.gated ? "JWT-gated" : "public/unlisted"} Slice?${assetPreview}\n\nOnly these notes and their referenced local images will be shared. Review for company/confidential data before publishing.`)) return;
 
     if (this.publishBtn) this.publishBtn.disabled = true;
 
     const ulids: string[] = [];
+    const freshAssets: Record<string, string> = {};
     const failed: { path: string; reason: string }[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       this.setStatus(`Publishing ${i + 1}/${files.length} — ${file.path}…`);
       try {
         const r = await this.plugin.publishNoteSilent(file, { force: true });
-        if (r) ulids.push(r.id);
-        else failed.push({ path: file.path, reason: "no ULID returned" });
+        if (r) {
+          ulids.push(r.id);
+          for (const [name, key] of Object.entries(r.assets)) freshAssets[`note:${r.id}:${name}`] = key;
+        } else failed.push({ path: file.path, reason: "no ULID returned" });
       } catch (e) {
         failed.push({
           path: file.path,
@@ -419,6 +433,14 @@ export class FolderPickerModal extends Modal {
       );
     }
 
+    if (failed.length) {
+      // Never publish a partially broken Slice. Already uploaded notes remain
+      // unscoped; the wrapper won't expose them until the complete batch works.
+      this.setStatus(`Blocked: ${failed.length} note(s) or attachments failed. See console.`);
+      new Notice("BrainShare: Slice not published because one or more notes/media failed.");
+      if (this.publishBtn) this.publishBtn.disabled = false;
+      return;
+    }
     if (ulids.length === 0) {
       new Notice(`BrainShare: 0/${files.length} published`);
       this.setStatus(`Failed all ${files.length}; check console for details`);
@@ -466,7 +488,14 @@ export class FolderPickerModal extends Modal {
         gated: this.gated,
         created_at: this.existingSlice?.created_at,
         canvases: carry?.canvases,
-        assets: carry?.assets,
+        assets: {
+          ...Object.keys(carry?.assets ?? {}).reduce((all: Record<string, string>, name) => {
+            const value = carry?.assets?.[name];
+          if (value !== undefined && !ulids.some(id => name.startsWith(`note:${id}:`))) all[name] = value;
+            return all;
+          }, {}),
+          ...freshAssets,
+        },
       });
       if (!ok) {
         new Notice(`BrainShare: wrapper PUT failed`);
