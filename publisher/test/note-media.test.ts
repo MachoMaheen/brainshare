@@ -97,4 +97,22 @@ describe("Obsidian media publishing regression", () => {
     expect(clear.status).toBe(200);
     expect((await request(`/share/review/asset/${key}`)).status).toBe(403);
   });
+  it("revokes published media immediately when the note is unpublished", async () => {
+    const {request, map} = setup();
+    const key = await upload(request);
+    map.set("wrap:docs",{value:JSON.stringify({title:"Docs",ulids:[ULID],assets:{},gated:false})});
+    map.set(`noterefs:${ULID}`,{value:JSON.stringify(["docs"])});
+    await request(`/api/notes/${ULID}`,{method:"PUT",
+      headers:{...bearer,"x-brainshare-standalone":"public"},body:"# Docs"});
+    await request(`/api/notes/${ULID}/assets`,{method:"PUT",
+      headers:{...bearer,"content-type":"application/json"},
+      body:JSON.stringify({assets:{"photo.png":key}})});
+    expect((await request(`/share/docs/asset/${key}`)).status).toBe(200);
+    expect((await request(`/note/${ULID}/asset/${key}`)).status).toBe(200);
+    expect((await request(`/api/notes/${ULID}`,{method:"DELETE",headers:bearer})).status).toBe(204);
+    expect((await request(`/note/${ULID}/asset/${key}`)).status).toBe(404);
+    expect((await request(`/share/docs/asset/${key}`)).status).toBe(403);
+    expect(map.has(`noteassets:${ULID}`)).toBe(false);
+  });
+
 });
