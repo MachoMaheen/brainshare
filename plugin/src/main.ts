@@ -240,7 +240,7 @@ export default class BrainSharePlugin extends Plugin {
       headers: {
         "content-type": "text/markdown",
         authorization: `Bearer ${publisherToken}`,
-        "x-note-path": file.path,
+        "x-note-path": encodeURIComponent(file.path),
         ...(opts?.standalone ? { "x-brainshare-standalone": "public" } : {}),
       },
       body: content,
