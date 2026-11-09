@@ -20,7 +20,7 @@ export function extractEmbeddedMediaTargets(markdown: string): string[] {
     if (match.index > 0 && visible[match.index - 1] === "\\") continue;
     let src = match[1].trim();
     // Markdown supports an optional quoted title after the path.
-    src = src.replace(/\s+["'][^"']*["']\s*$/, "").trim();
+    src = src.replace(/\s+["'][^"']*["']\s*$/, "").trim().replace(/^<|>$/g, "");
     if (/^(?:https?:|data:|blob:|\/\/)/i.test(src)) continue;
     targets.push(src);
   }
