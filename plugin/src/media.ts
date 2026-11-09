@@ -110,8 +110,9 @@ export async function uploadNoteMedia(
       }
       uploaded.set(item.file.path, key);
     }
+    // Store the exact Markdown reference, not a second full-path alias.
+    // The per-note scope resolves same-basename attachments without collisions.
     assets[item.reference] = key;
-    assets[item.file.path] = key;
   }
   return assets;
 }
