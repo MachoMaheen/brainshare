@@ -476,15 +476,25 @@ export default {
         await env.NOTES.delete(`standalone:${ulid}`);
         await env.NOTES.delete(`meta:${ulid}`);
         await env.NOTES.delete(`noteassets:${ulid}`);
-        // Invalidate caches + rebuild indexes for all wrappers that include this note
+        // Unpublishing must also revoke the deleted note's image membership.
+        // The underlying content-addressed KV blob can remain for dedupe, but
+        // must no longer be accessible through any Slice referencing this note.
         const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
         if (refsRaw) {
           const wrapIds: string[] = JSON.parse(refsRaw);
-          await Promise.all(wrapIds.map((wid) => bumpWrapVersion(env, wid)));
-          ctx.waitUntil(Promise.all(wrapIds.map(async (wid) => {
+          for (const wid of wrapIds) {
             const wRaw = await env.NOTES.get(`wrap:${wid}`);
-            if (wRaw) await buildWrapIndex(env, wid, JSON.parse(wRaw) as WrapData);
-          })));
+            if (!wRaw) continue;
+            const wrap = JSON.parse(wRaw) as WrapData;
+            const nextAssets: Record<string, string> = {};
+            for (const [name, key] of Object.entries(wrap.assets ?? {})) {
+              if (!name.startsWith(`note:${ulid}:`)) nextAssets[name] = key;
+            }
+            wrap.assets = nextAssets;
+            await env.NOTES.put(`wrap:${wid}`, JSON.stringify(wrap));
+            await bumpWrapVersion(env, wid);
+            await buildWrapIndex(env, wid, wrap);
+          }
         }
         return new Response(null, { status: 204 });
       }
