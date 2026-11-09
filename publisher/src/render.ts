@@ -3146,7 +3146,7 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     (m, alt: string, src: string) => {
       // Support standard Markdown's angle-bracket paths with spaces and the
       // optional quoted title, while retaining exact per-note asset keys.
-      const s = src.trim().replace(/^<|>$/g, "").replace(/\s+["'][^"']*["']\s*$/, "").trim();
+      const s = src.trim().replace(/\s+["'][^"']*["']\s*$/, "").trim().replace(/^<|>$/g, "");
       if (/^https?:\/\//i.test(s) || s.startsWith("/asset/")) return m;
       if (!IMG_EXT.test(s)) return m;
       const url = assetUrl(s);
