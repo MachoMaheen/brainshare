@@ -12,12 +12,12 @@ export function extractEmbeddedMediaTargets(markdown: string): string[] {
   const obsidianEmbed = /!\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
   let match: RegExpExecArray | null;
   while ((match = obsidianEmbed.exec(visible)) !== null) {
-    if (match.index > 0 && visible[match.index - 1] === "\\\\") continue;
+    if (match.index > 0 && visible[match.index - 1] === "\\") continue;
     targets.push(match[1].trim());
   }
   const markdownEmbed = /!\[[^\]]*\]\((<[^>]+>|[^)\n]+)\)/g;
   while ((match = markdownEmbed.exec(visible)) !== null) {
-    if (match.index > 0 && visible[match.index - 1] === "\\\\") continue;
+    if (match.index > 0 && visible[match.index - 1] === "\\") continue;
     let src = match[1].trim().replace(/^<|>$/g, "");
     // Markdown supports an optional quoted title after the path.
     src = src.replace(/\s+["'][^"']*["']\s*$/, "").trim();
