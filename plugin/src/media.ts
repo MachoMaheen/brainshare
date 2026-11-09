@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { App, TFile, requestUrl, normalizePath } from "obsidian";
+import { extractEmbeddedMediaTargets } from "./media-extract";
 
 // The Worker intentionally accepts only inert raster images in KV. Other
 // attachments require a separate reviewed storage/serving policy (R2).
@@ -7,7 +8,7 @@ export const SUPPORTED_IMAGE_MIMES: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp",
 };
-import { extractEmbeddedMediaTargets } from "./media-extract";
+const MAX_IMAGE_BYTES = 5_000_000;
 
 export interface LocalMedia {
   reference: string; file: TFile; mime: string;
