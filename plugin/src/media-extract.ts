@@ -18,7 +18,7 @@ export function extractEmbeddedMediaTargets(markdown: string): string[] {
   const markdownEmbed = /!\[[^\]]*\]\((<[^>]+>|[^)\n]+)\)/g;
   while ((match = markdownEmbed.exec(visible)) !== null) {
     if (match.index > 0 && visible[match.index - 1] === "\\") continue;
-    let src = match[1].trim().replace(/^<|>$/g, "");
+    let src = match[1].trim();
     // Markdown supports an optional quoted title after the path.
     src = src.replace(/\s+["'][^"']*["']\s*$/, "").trim();
     if (/^(?:https?:|data:|blob:|\/\/)/i.test(src)) continue;
