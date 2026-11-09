@@ -60,6 +60,40 @@ export function resolveNoteMedia(app: App, note: TFile, markdown: string): Local
   });
 }
 
+/**
+ * The Worker deliberately rejects embedded image metadata. For static images
+ * re-encode in the Obsidian renderer before upload so EXIF/XMP/text chunks do
+ * not get published. Do not silently flatten animated GIFs.
+ */
+async function privacySafeBytes(bytes: ArrayBuffer, mime: string, filePath: string): Promise<ArrayBuffer> {
+  const raw = new TextDecoder("latin1").decode(bytes);
+  const markers = ["Exif", "exif", "eXIf", "tEXt", "iTXt", "zTXt", "XMP", "xmp", "http://ns.adobe.com/xap"];
+  if (!markers.some(marker => raw.includes(marker))) return bytes;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(mime)) {
+    throw new Error(`Image "${filePath}" contains metadata that cannot safely be removed automatically from ${mime}. Export a metadata-free copy first.`);
+  }
+  if (typeof createImageBitmap !== "function") {
+    throw new Error(`Image "${filePath}" contains metadata; this Obsidian environment does not support safe re-encoding.`);
+  }
+  const bitmap = await createImageBitmap(new Blob([bytes], {type:mime}));
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas unavailable");
+    ctx.drawImage(bitmap, 0, 0);
+    const cleaned = await new Promise<Blob>((resolve,reject) =>
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Image conversion failed")), mime, 0.96)
+    );
+    if (cleaned.type !== mime) throw new Error(`Image format ${mime} not supported for safe re-encoding`);
+    return await cleaned.arrayBuffer();
+  } catch (e) {
+    throw new Error(`Could not safely strip metadata from "${filePath}": ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    bitmap.close();
+  }
+}
+
 async function sha256(bytes: ArrayBuffer): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
@@ -80,8 +114,10 @@ export async function uploadNoteMedia(
   for (const item of media) {
     let key = uploaded.get(item.file.path);
     if (!key) {
-      const bytes = await app.vault.readBinary(item.file);
-      if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error(`Image too large: ${item.file.path}`);
+      const originalBytes = await app.vault.readBinary(item.file);
+      if (originalBytes.byteLength > MAX_IMAGE_BYTES) throw new Error(`Image too large: ${item.file.path}`);
+      const bytes = await privacySafeBytes(originalBytes, item.mime, item.file.path);
+      if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error(`Sanitized image too large: ${item.file.path}`);
       key = await sha256(bytes);
       const response = await requestUrl({
         url: `${publisherUrl}/api/assets/${key}`,
