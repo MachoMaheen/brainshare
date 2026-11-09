@@ -376,6 +376,18 @@ export default class BrainSharePlugin extends Plugin {
       if (f instanceof TFile && f.extension === "md") files.push(f);
       else missing.push(path);
     }
+    // Republish can add new local attachments to an already shared Slice.
+    // Require the author to review those filenames before transferring bytes.
+    const mediaPaths = new Set<string>();
+    for (const file of files) {
+      const md = await this.app.vault.read(file);
+      for (const item of resolveNoteMedia(this.app, file, md)) mediaPaths.add(item.file.path);
+    }
+    if (mediaPaths.size) {
+      const paths = [...mediaPaths].sort();
+      const displayed = paths.slice(0, 20).map(p => "• " + p).join("\n");
+      if (!confirm(`Re-publish ${files.length} note(s) with ${paths.length} referenced image(s)?\n${displayed}${paths.length > 20 ? `\n… and ${paths.length - 20} more` : ""}\n\nThese images will become accessible to recipients of this Slice.`)) return null;
+    }
     const ulids: string[] = [];
     let changed = 0;
     let unchanged = 0;
