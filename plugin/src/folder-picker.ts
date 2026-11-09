@@ -490,7 +490,8 @@ export class FolderPickerModal extends Modal {
         canvases: carry?.canvases,
         assets: {
           ...Object.keys(carry?.assets ?? {}).reduce((all: Record<string, string>, name) => {
-            if (!ulids.some(id => name.startsWith(`note:${id}:`))) all[name] = (carry?.assets ?? {})[name];
+            const value = carry?.assets?.[name];
+          if (value !== undefined && !ulids.some(id => name.startsWith(`note:${id}:`))) all[name] = value;
             return all;
           }, {}),
           ...freshAssets,
