@@ -81,6 +81,56 @@ async function getNotePath(notes: KVNamespace, ulid: string): Promise<string | u
   try { return (JSON.parse(raw) as NoteMeta).path; } catch { return undefined; }
 }
 
+
+/** Standalone notes never bypass a gated Slice that also references them. */
+async function isPublicStandalone(env: Env, ulid: string): Promise<boolean> {
+  if (!(await env.NOTES.get(`standalone:${ulid}`))) return false;
+  const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
+  if (!refsRaw) return true;
+  let refs: unknown;
+  try { refs = JSON.parse(refsRaw); } catch { return false; }
+  if (!Array.isArray(refs)) return false;
+  for (const wrapId of refs) {
+    if (typeof wrapId !== "string") return false;
+    const raw = await env.NOTES.get(`wrap:${wrapId}`);
+    if (!raw) continue;
+    try {
+      if ((JSON.parse(raw) as WrapData).gated) return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
+function parseNoteAssetMap(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out: Record<string, string> = {};
+    for (const [name, key] of Object.entries(value)) {
+      if (typeof key === "string" && /^[a-f0-9]{64}$/.test(key) && name !== "__proto__") out[name] = key;
+    }
+    return out;
+  } catch { return {}; }
+}
+
+async function serveRasterAsset(notes: KVNamespace, key: string, isGated: boolean): Promise<Response> {
+  const { value, metadata } = await notes.getWithMetadata(`asset:${key}`, "arrayBuffer");
+  if (!value) return new Response("not found", { status: 404 });
+  const ct = safeStoredImageMime(metadata);
+  if (!ct || sniffSafeImage(new Uint8Array(value)) !== ct || hasEmbeddedImageMetadata(new Uint8Array(value))) {
+    return new Response("unsupported asset", { status: 415, headers: { "cache-control": "no-store" } });
+  }
+  return new Response(value, { headers: {
+    "content-type": ct,
+    "cache-control": isGated ? "private, no-store" : "public, max-age=300",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "sandbox; default-src 'none'",
+    "cross-origin-resource-policy": "same-origin",
+    "referrer-policy": "no-referrer",
+  } });
+}
+
 async function buildCanvasSet(notes: KVNamespace, ulids: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (!ulids.length) return out;
@@ -317,6 +367,66 @@ export default {
       return json({ purged: wrapId, version: newVer });
     }
 
+
+    // PUT /api/notes/:ulid/assets — strictly-scoped image manifest for a note.
+    // Binary assets are uploaded first; these references are never unrestricted.
+    const noteAssetsMatch = path.match(/^\/api\/notes\/([0-9A-HJKMNP-TV-Z]{26})\/assets$/);
+    if (noteAssetsMatch) {
+      if (unauthorized(env, req)) return forbidden();
+      if (req.method !== "PUT" && req.method !== "GET") return new Response("method not allowed", { status: 405 });
+      const ulid = noteAssetsMatch[1];
+      if (req.method === "GET") return json({ assets: parseNoteAssetMap(await env.NOTES.get(`noteassets:${ulid}`)) });
+      if (!(await rateLimitOk(env, req, "note-assets", 60, 60))) return rateLimited(60);
+      const text = await req.text();
+      if (text.length > 65_536) return new Response("asset manifest too large", { status: 413 });
+      let parsed: { assets?: unknown };
+      try { parsed = JSON.parse(text); } catch { return new Response("invalid JSON", { status: 400 }); }
+      if (!parsed || typeof parsed !== "object" || !parsed.assets ||
+          typeof parsed.assets !== "object" || Array.isArray(parsed.assets)) {
+        return new Response("assets must be a filename-to-SHA256 object", { status: 400 });
+      }
+      const entries = Object.entries(parsed.assets);
+      if (entries.length > 120) return new Response("too many media references", { status: 413 });
+      const assets: Record<string, string> = Object.create(null);
+      for (const [name, key] of entries) {
+        if (!name || name.length > 512 || name === "__proto__" ||
+            typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key)) {
+          return new Response("invalid image mapping", { status: 400 });
+        }
+        assets[name] = key;
+      }
+      // Fail closed if a client tries to reference an image it did not upload.
+      for (const key of new Set(Object.values(assets))) {
+        if (!(await env.NOTES.get(`asset:${key}`, "arrayBuffer"))) {
+          return new Response("image not uploaded: " + key, { status: 409 });
+        }
+      }
+      const oldRaw = await env.NOTES.get(`noteassets:${ulid}`);
+      const canonical = JSON.stringify(assets);
+      if (JSON.stringify(parseNoteAssetMap(oldRaw)) !== canonical) {
+        await env.NOTES.put(`noteassets:${ulid}`, canonical);
+        const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
+        let refs: string[] = [];
+        try { refs = refsRaw ? JSON.parse(refsRaw) as string[] : []; } catch { refs = []; }
+        for (const wid of refs) {
+          const wrapRaw = await env.NOTES.get(`wrap:${wid}`);
+          if (!wrapRaw) continue;
+          const wrap = JSON.parse(wrapRaw) as WrapData;
+          // Replace only this note's automatically-managed mappings. Keep
+          // unrelated files and historical bulk-uploaded assets intact.
+          const previous = Object.fromEntries(Object.entries(wrap.assets ?? {}).filter(([name]) =>
+            !name.startsWith(`note:${ulid}:`)
+          ));
+          for (const [name, key] of Object.entries(assets)) previous[`note:${ulid}:${name}`] = key;
+          wrap.assets = previous;
+          await env.NOTES.put(`wrap:${wid}`, JSON.stringify(wrap));
+          await bumpWrapVersion(env, wid);
+          await buildWrapIndex(env, wid, wrap);
+        }
+      }
+      return json({ ulid, assetCount: new Set(Object.values(assets)).size });
+    }
+
     // PUT /api/notes/:ulid — store note + filename metadata (auth required)
     const noteMatch = path.match(/^\/api\/notes\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (noteMatch) {
@@ -365,6 +475,7 @@ export default {
         await env.NOTES.delete(`note:${ulid}`);
         await env.NOTES.delete(`standalone:${ulid}`);
         await env.NOTES.delete(`meta:${ulid}`);
+        await env.NOTES.delete(`noteassets:${ulid}`);
         // Invalidate caches + rebuild indexes for all wrappers that include this note
         const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
         if (refsRaw) {
@@ -474,21 +585,20 @@ export default {
         return new Response("asset not in this share", { status: 403 });
       const gate = await checkGate(env, wrap, wrapId, url, req);
       if (!gate.ok) return gate.resp;
-      const { value, metadata } = await env.NOTES.getWithMetadata(`asset:${key}`, "arrayBuffer");
-      if (!value) return new Response("not found", { status: 404 });
-      // Legacy assets may have untrusted MIME metadata. Refuse unsupported
-      // stored formats even when referenced by a historical wrapper.
-      const ct = safeStoredImageMime(metadata);
-      if (!ct || sniffSafeImage(new Uint8Array(value)) !== ct || hasEmbeddedImageMetadata(new Uint8Array(value)))
-        return new Response("unsupported asset", { status: 415, headers: { "cache-control": "no-store" } });
-      return new Response(value, { headers: {
-        "content-type": ct,
-        "cache-control": wrap.gated ? "private, no-store" : "public, max-age=300",
-        "x-content-type-options": "nosniff",
-        "content-security-policy": "sandbox; default-src 'none'",
-        "cross-origin-resource-policy": "same-origin",
-        "referrer-policy": "no-referrer",
-      } });
+      return serveRasterAsset(env.NOTES, key, !!wrap.gated);
+    }
+
+
+    // Standalone images require standalone-note authorization AND per-note
+    // manifest membership. No global /asset/:sha route is exposed.
+    const standaloneAssetMatch = path.match(/^\/note\/([0-9A-HJKMNP-TV-Z]{26})\/asset\/([a-f0-9]{64})$/i);
+    if (standaloneAssetMatch && req.method === "GET") {
+      const [, ulid, rawKey] = standaloneAssetMatch;
+      const key = rawKey.toLowerCase();
+      if (!(await isPublicStandalone(env, ulid))) return new Response("not found", { status: 404 });
+      const assets = parseNoteAssetMap(await env.NOTES.get(`noteassets:${ulid}`));
+      if (!Object.values(assets).includes(key)) return new Response("asset not in this note", { status: 403 });
+      return serveRasterAsset(env.NOTES, key, false);
     }
 
     // GET /api/export — stream every KV key/value as NDJSON for backup (auth required)
@@ -986,7 +1096,7 @@ ${entries}
             shareBase,
             shareSet,
             canvasSet,
-            assets: wrap.assets,
+            assets: { ...wrap.assets, ...parseNoteAssetMap(await env.NOTES.get(`noteassets:${ulid}`)) },
             path: current.path,
             tokenQuery: "",
             gated: wrap.gated,
@@ -1036,7 +1146,7 @@ ${entries}
             shareBase,
             shareSet,
             canvasSet,
-            assets: wrap.assets,
+            assets: { ...wrap.assets, ...parseNoteAssetMap(await env.NOTES.get(`noteassets:${ulid}`)) },
             path: currentMeta.path,
             tokenQuery: "",
             gated: wrap.gated,
@@ -1105,29 +1215,18 @@ ${entries}
     const getMatch = path.match(/^\/([0-9A-HJKMNP-TV-Z]{26})$/);
     if (getMatch && req.method === "GET") {
       const ulid = getMatch[1];
-      const standalone = await env.NOTES.get(`standalone:${ulid}`);
-      if (!standalone) return html("<h1>404</h1><p>note not found</p>", 404);
-      const refsRaw = await env.NOTES.get(`noterefs:${ulid}`);
-      if (refsRaw) {
-        let refs: string[];
-        try { refs = JSON.parse(refsRaw) as string[]; }
-        catch { return forbidden(); }
-        if (!Array.isArray(refs)) return forbidden();
-        for (const wrapId of refs) {
-          const raw = await env.NOTES.get(`wrap:${wrapId}`);
-          if (!raw) continue;
-          let referenced: WrapData;
-          try { referenced = JSON.parse(raw) as WrapData; }
-          catch { return forbidden(); }
-          if (referenced.gated) return forbidden();
-        }
-      }
-      const [md, notePath] = await Promise.all([
+      if (!(await isPublicStandalone(env, ulid))) return html("<h1>404</h1><p>note not found</p>", 404);
+      const [md, notePath, assetsRaw] = await Promise.all([
         env.NOTES.get(`note:${ulid}`),
         getNotePath(env.NOTES, ulid),
+        env.NOTES.get(`noteassets:${ulid}`),
       ]);
       if (!md) return html("<h1>404</h1><p>note not found</p>", 404);
-      return html(renderNote(md, ulid, { path: notePath }));
+      return html(renderNote(md, ulid, {
+        path: notePath,
+        assets: parseNoteAssetMap(assetsRaw),
+        assetBase: `${origin}/note/${ulid}`,
+      }));
     }
 
     // Machine-readable endpoints for AI search engines and agents.
