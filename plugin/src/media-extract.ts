@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+const EMBEDDED_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp|svg|pdf|mp4|webm|mov|mp3|m4a|wav|ogg)$/i;
+
+/** Extract local embeds, not ordinary links or examples inside fenced code. */
+export function extractEmbeddedMediaTargets(markdown: string): string[] {
+  const withoutFences = markdown.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*(?:\n|$)/gm, "");
+  const targets: string[] = [];
+  const obsidianEmbed = /!\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = obsidianEmbed.exec(withoutFences)) !== null) {
+    targets.push(match[1].trim());
+  }
+  const markdownEmbed = /!\[[^\]]*\]\((<[^>]+>|[^)\n]+)\)/g;
+  while ((match = markdownEmbed.exec(withoutFences)) !== null) {
+    let src = match[1].trim().replace(/^<|>$/g, "");
+    // Markdown supports an optional quoted title after the path.
+    src = src.replace(/\s+["'][^"']*["']\s*$/, "").trim();
+    if (/^(?:https?:|data:|blob:|\/\/)/i.test(src)) continue;
+    targets.push(src);
+  }
+  return [...new Set(targets.filter(target => EMBEDDED_EXTENSIONS.test(target.split(/[?#]/)[0])))];
+}
