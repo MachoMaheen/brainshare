@@ -10,6 +10,7 @@ import {
 } from "obsidian";
 import { ulid, isValidUlid } from "./ulid";
 import { scanPublicationMarkdown } from "@brainshare/core";
+import { resolveNoteMedia, uploadNoteMedia } from "./media";
 import { FolderPickerModal } from "./folder-picker";
 import { MintTokenModal } from "./mint-modal";
 import { SlicesModal } from "./slices-modal";
@@ -197,7 +198,7 @@ export default class BrainSharePlugin extends Plugin {
   async publishNoteSilent(
     file: TFile,
     opts?: { force?: boolean; hashes?: HashMap; standalone?: boolean }
-  ): Promise<{ id: string; pushed: boolean } | null> {
+  ): Promise<{ id: string; pushed: boolean; assets: Record<string, string> } | null> {
     const { publisherUrl, publisherToken } = this.settings;
     if (!publisherUrl || !publisherToken) return null;
     await this.stampUlid(file);
@@ -206,13 +207,31 @@ export default class BrainSharePlugin extends Plugin {
     const content = await this.app.vault.read(file);
     const findings = scanPublicationMarkdown(file.path, content);
     if(findings.length) throw new Error(`Preflight blocked ${file.path}: ${findings.map(f=>f.code+" at line "+(f.line??"path")).join(", ")}`);
+    // Resolve and publish all local images before making the note visible.
+    // An unchanged Markdown body can still have edited image bytes, so this
+    // MUST happen before the body-hash short-circuit.
+    const media = resolveNoteMedia(this.app, file, content);
+    const assets = await uploadNoteMedia(this.app, file, content, publisherUrl, publisherToken, media);
+    const manifestResponse = await requestUrl({
+      url: `${publisherUrl}/api/notes/${id}/assets`,
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${publisherToken}`,
+      },
+      body: JSON.stringify({ assets }),
+      throw: false,
+    });
+    if (manifestResponse.status >= 400) {
+      throw new Error(`Cannot publish image manifest for ${file.path} (HTTP ${manifestResponse.status}): ${(manifestResponse.text ?? "").slice(0, 160)}`);
+    }
     const hash = contentHash(content);
 
     const ownCache = opts?.hashes === undefined;
     const hashes = opts?.hashes ?? (await this.readHashes());
 
     if (!opts?.force && hashes[id] === hash) {
-      return { id, pushed: false };
+      return { id, pushed: false, assets };
     }
 
     const res = await requestUrl({
@@ -239,7 +258,7 @@ export default class BrainSharePlugin extends Plugin {
 
     hashes[id] = hash;
     if (ownCache) await this.writeHashes(hashes);
-    return { id, pushed: true };
+    return { id, pushed: true, assets };
   }
 
   /**
@@ -360,12 +379,14 @@ export default class BrainSharePlugin extends Plugin {
     const ulids: string[] = [];
     let changed = 0;
     let unchanged = 0;
+    const refreshedAssets: Record<string, string> = {};
     const hashes = await this.readHashes();
     for (const f of files) {
       try {
         const r = await this.publishNoteSilent(f, { hashes });
         if (r) {
           ulids.push(r.id);
+          for (const [name, key] of Object.entries(r.assets)) refreshedAssets[`note:${r.id}:${name}`] = key;
           if (r.pushed) changed++;
           else unchanged++;
         }
@@ -398,7 +419,12 @@ export default class BrainSharePlugin extends Plugin {
       gated: slice.gated,
       created_at: slice.created_at,
       canvases: carry?.canvases,
-      assets: carry?.assets,
+      assets: {
+        ...Object.fromEntries(Object.entries(carry?.assets ?? {}).filter(([name]) =>
+          !ulids.some(id => name.startsWith(`note:${id}:`))
+        )),
+        ...refreshedAssets,
+      },
     });
     if (!ok) return null;
     return { pushed: ulids.length, changed, unchanged, missing, ulids: mergedUlids, resolvedFiles: files };
@@ -564,7 +590,12 @@ export default class BrainSharePlugin extends Plugin {
       return;
     }
     try {
-      if (!confirm(`Publish "${file.path}" as a publicly accessible standalone note? Anyone with its URL can read it. Review the contents before continuing.`)) return;
+      const markdown = await this.app.vault.read(file);
+      const media = resolveNoteMedia(this.app, file, markdown);
+      const preview = media.length
+        ? `\n\nAlso publicly share ${media.length} referenced image(s):\n${media.slice(0, 20).map(x => "• " + x.file.path).join("\n")}${media.length > 20 ? `\n… and ${media.length - 20} more` : ""}`
+        : "";
+      if (!confirm(`Publish "${file.path}" publicly?${preview}\n\nAnyone with the URL can read the note and listed image attachments. Verify no confidential material is present.`)) return;
       const r = await this.publishNoteSilent(file, { force: true, standalone: true });
       const id = r?.id ?? null;
       if (!id) {
