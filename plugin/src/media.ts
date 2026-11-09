@@ -49,6 +49,12 @@ async function privacySafeBytes(bytes: ArrayBuffer, mime: string, filePath: stri
   const raw = new TextDecoder("latin1").decode(bytes);
   const markers = ["Exif", "exif", "eXIf", "tEXt", "iTXt", "zTXt", "XMP", "xmp", "http://ns.adobe.com/xap"];
   if (!markers.some(marker => raw.includes(marker))) return bytes;
+  // Canvas re-encoding would silently remove animation frames. Never flatten
+  // an animated PNG/WebP just to strip metadata.
+  if ((mime === "image/png" && raw.includes("acTL")) ||
+      (mime === "image/webp" && (raw.includes("ANIM") || raw.includes("ANMF")))) {
+    throw new Error(`Animated image "${filePath}" contains metadata. Export a clean animated copy before publishing.`);
+  }
   if (!["image/png", "image/jpeg", "image/webp"].includes(mime)) {
     throw new Error(`Image "${filePath}" contains metadata that cannot safely be removed automatically from ${mime}. Export a metadata-free copy first.`);
   }
