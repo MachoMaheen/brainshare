@@ -420,9 +420,10 @@ export default class BrainSharePlugin extends Plugin {
       created_at: slice.created_at,
       canvases: carry?.canvases,
       assets: {
-        ...Object.fromEntries(Object.entries(carry?.assets ?? {}).filter(([name]) =>
-          !ulids.some(id => name.startsWith(`note:${id}:`))
-        )),
+        ...Object.keys(carry?.assets ?? {}).reduce((all: Record<string, string>, name) => {
+          if (!ulids.some(id => name.startsWith(`note:${id}:`))) all[name] = (carry?.assets ?? {})[name];
+          return all;
+        }, {}),
         ...refreshedAssets,
       },
     });
