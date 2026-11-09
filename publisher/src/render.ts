@@ -3078,6 +3078,7 @@ export interface RenderCtx {
   shareSet?: Map<string, string>; // basename → ulid (for .md wikilink resolution)
   canvasSet?: Map<string, string>;// canvas basename (no ext) → canvas ulid
   assets?: Record<string, string>;// image filename → asset key (for image embed rewriting)
+  assetBase?: string;              // standalone /note/:ulid; keeps links independent of a Slice
   path?: string;                  // vault-relative path (for breadcrumb)
   tokenQuery?: string;            // "?t=<jwt>" appended to internal links when gated
   gated?: boolean;
@@ -3122,7 +3123,8 @@ export function renderNote(md: string, ulid: string, ctx?: RenderCtx): string {
     if (!ctx?.assets) return null;
     // Match either by full path or by basename — bulk-publish stores both forms
     const direct = ctx.assets[filename] || ctx.assets[filename.split("/").pop() ?? filename];
-    return direct && ctx.shareBase ? `${ctx.shareBase}/asset/${direct}` : null;
+    const base = ctx.assetBase ?? ctx.shareBase;
+    return direct && base ? `${base}/asset/${direct}` : null;
   };
 
   // ![[image.jpg]] and ![[image.jpg|alt]] — Obsidian-style image embeds (must run before
